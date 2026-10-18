@@ -29,7 +29,7 @@ source .local/cosmos-libero.env
 
 CLI 路径优先于环境变量；shell 入口不会自动加载 `.env` 文件。也可使用选定的解释器直接运行 `python benchmarks/static/cosmos_libero/run.py`。`config.yaml` 中的 BDDL、初态、资产等路径须指向已准备好的 LIBERO 资源；运行入口设置 `LIBERO_CONFIG_PATH`。
 
-CPU 开发依赖足以运行配置和接口测试。实际模型运行还需要兼容的 PyTorch/CUDA、Cosmos 依赖、LIBERO、MuJoCo/robosuite 及 EGL；启用录像需要 imageio 和 MP4/FFmpeg 后端。本机测试使用普通用户的Python 3.10.12环境，复用既有Cosmos packages，并单独安装robosuite 1.4.0；实际组合为PyTorch 2.7.0+cu128、MuJoCo 3.2.6、LIBERO 0.1.1。RoboCasa使用的robosuite 1.5.x不满足本LIBERO包的SingleArmEnv接口。这个本地复用环境不是完整的新机器安装流程。
+CPU 开发依赖足以运行配置和接口测试。实际模型运行还需要兼容的 PyTorch/CUDA、Cosmos 依赖、LIBERO、MuJoCo/robosuite 及 EGL；启用录像需要 imageio 和 MP4/FFmpeg 后端。本机测试使用普通用户的Python 3.10.12环境，复用既有Cosmos packages，并单独安装robosuite 1.4.0；实际组合为PyTorch 2.7.0+cu128、MuJoCo 3.2.6、LIBERO 0.1.1。RoboCasa使用的robosuite 1.5.x不满足本LIBERO包的SingleArmEnv接口。在新机器上按环境指南安装依赖，并完成资源预检与单回合闭环检查。
 
 实验入口保持离线，缺少文件时先运行 `python tools/prepare_resources.py --case cosmos_libero`。模型默认下载到 `~/.cache/robotics/hub/`，LIBERO资产到 `~/.cache/libero/assets/`，再显式加载生成的 `~/.cache/robotics/env/cosmos_libero.env`。生成完整源码、解释器和初态配置的方法见 [资源准备说明](../../../tools/RESOURCE_PREPARATION.md)。原生配置中的已知 Video2World 基础 checkpoint 引用在加载期间绑定到本次 Policy checkpoint，并核对最终加载路径；不再依赖源码目录中那份未参与推理的基础权重。
 
@@ -44,7 +44,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --output-dir runs/static/cosmos_libero/sync-001 --dry-run
 ```
 
-`--dry-run` 校验参数、所需文件、统计量维度和有限数值，并用 AST 检查外部 `get_action` 调用签名。它读取文件计算 SHA-256，不反序列化 checkpoint/T5，不导入模型、Torch 或模拟器，不创建输出目录。大型 checkpoint 的哈希仍需要文件读取时间。预检通过不代表模型加载、数值或 GPU 闭环已验证。
+`--dry-run` 校验参数、所需文件、统计量维度和有限数值，并用 AST 检查外部 `get_action` 调用签名。它读取文件计算 SHA-256，不反序列化 checkpoint/T5，不导入模型、Torch 或模拟器，不创建输出目录。大型 checkpoint 的哈希仍需要文件读取时间。随后用固定输入检查动作数值，并用单回合验证模型与模拟器。
 
 实际运行必须显式指定一个 GPU 索引或完整 GPU UUID。以下用 GPU 0 示意，执行前替换为可用设备；每次使用新输出目录。
 
@@ -98,7 +98,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
 
 `sync` 在需要生成动作块时使用当前观测。`paper_async` 在控制步 t 回取 t−n′ 的历史观测，主相机、腕相机和 proprio 来自同一份快照；历史不足时使用当前观测。历史按原始控制步保存，每次 episode reset 清空。省略 `--schedule` 时，正的 `--overlap-actions` 自动选择 `paper_async`；显式 `sync` 与正 n′ 冲突会失败。
 
-这是串行执行中的历史观测实验，不包含推理与环境步进的真实后台并发。`requests.jsonl` 记录调用的 `control_step`、`observation_step`、`history_offset_steps` 和 `inference_index`，可核对实际采用的观测。
+runner串行推进环境，通过历史快照评估观测延迟对动作质量的影响。`requests.jsonl` 记录调用的 `control_step`、`observation_step`、`history_offset_steps` 和 `inference_index`，可核对实际采用的观测。
 
 论文周期复用 [paper_async.py](../pi05_libero/paper_async.py) 的合同：
 
@@ -106,7 +106,7 @@ $$
 C(n')=T_{\mathrm{inf}}+nT_{\mathrm{act}}-\min(T_{\mathrm{inf}},n'T_{\mathrm{act}}).
 $$
 
-`--paper-action-time-ms` 默认 50 ms，仅用于 `paper_model` 估算，不修改模拟器控制或 physics dt。需要周期估算时，同时传 `--paper-inference-time-ms` 和非空 `--paper-inference-time-source`，声明同配置 profile 的时延与来源；入口不验证来源文件。缺少推理时延时，周期保持 `null`、状态为 `requires_inference_profile`。`eval_s` 是串行评估墙钟时间，不能替代论文周期；控制步数也不能直接充当模型时延或加速比。
+`--paper-action-time-ms` 默认 50 ms，仅用于 `paper_model` 估算，不修改模拟器控制或 physics dt。需要周期估算时，同时传 `--paper-inference-time-ms` 和非空 `--paper-inference-time-source`，声明同配置 profile 的时延与来源；入口不验证来源文件。缺少推理时延时，周期保持 `null`、状态为 `requires_inference_profile`。`eval_s` 单列串行评估墙钟时间；控制步数、推理时延与论文周期分别记录。
 
 ## 视频与自动产物
 
@@ -134,9 +134,9 @@ manifest 使用独立 `cosmos-libero-run-v1` 格式，`requests.jsonl` 是本 ca
 
 已完成586项CPU测试及RTX 6000 Ada上的以下GPU检查：固定 `sample_libero_10_observation.pkl`、seed195时，新引擎与原生动作接口输出完全相等（16×7、float64、最大绝对误差0）；LIBERO-object任务0、初态0、环境seed0、H=n=16、5步采样下，同步episode在137个控制步成功，`paper_async n′=2` 在154步成功。两次加载与覆盖审计通过；异步请求记录确认首轮使用当前观测，后续回看2个原始控制步；录像为256×256、30 FPS、155帧，含初始和终止画面。
 
-以上是原始接入阶段的固定输入对齐和单episode闭环证据，不是完整任务集成功率。后续已有独立的 DiT INT8/INT4 完整调用计时和 profile，见 [Cosmos 量化指南](../../../docs/cosmos-quantization.md)；这些推理时延不直接当作论文任务加速比。量化全任务集质量尚未验证；RoboCasa的独立验证范围见 [对应case](../cosmos_robocasa/README.md)。
+以上记录覆盖固定输入对齐和指定初态的单episode闭环。DiT INT8/INT4完整调用计时与profile见 [Cosmos量化指南](../../../docs/cosmos-quantization.md)；任务级比较需绑定相同配置的闭环质量与请求计数。RoboCasa使用 [独立case记录](../cosmos_robocasa/README.md)。
 
-Cosmos 接入在基线 `1a4983e` 之后扩展，保留该基线已有的 π0.5 功能及其独立入口。默认执行本仓维护的 policy、sampler 和 DiT，加载框架及 VAE/attention 依赖仍来自调用者指定的兼容外部源码。已验证外部源码副本缺少 `.git`，不能标为某个纯上游 commit：计划记录 Python 源码树 SHA-256 与 `git_available=false`，有可用 Git 信息时才记录真实 commit/dirty 身份。资源文件、本仓执行代码和选项共同进入 case 指纹。
+默认执行本仓维护的 policy、sampler 和 DiT，加载框架及 VAE/attention 依赖仍来自调用者指定的兼容外部源码。外部源码有Git信息时记录commit/dirty身份；已验证副本缺少 `.git`，使用Python源码树SHA-256与 `git_available=false` 标识。资源文件、本仓执行代码和选项共同进入 case 指纹。
 
 来源与条款边界见 [第三方记录](../../../THIRD_PARTY_NOTICES.md)；模型、任务、调度和时间口径分别遵循 [模型接入](../../../docs/protocols/model-adapters.md)、[仿真协议](../../../docs/protocols/simulation.md) 与 [加速比协议](../../../docs/protocols/speedup-metrics.md)。
 
@@ -154,7 +154,6 @@ sampler 和 DiT 执行代码；通用框架、VAE 和 attention 库仍为外部�
 `--precision int8 --quant-scope dit --quant-tier N` 可选择渐进INT4覆盖；档位定义、
 完整推理扫描与同初态闭环入口见 [渐进量化协议](../../../docs/protocols/progressive-quantization.md)。
 推理计时、动作检查和自动图表见 [inference benchmark](../../inference/README.md)。
-单次 smoke 不代表整个任务集的质量已经验证。
 
 `vae_norm_fusion`、`vae_silu_fusion` 和 `vae_condition_prefix` 复用与 RoboCasa
 相同的 VAE 实现。LIBERO 在原生16帧编码窗口下执行33帧中的前17帧，保留完整9帧

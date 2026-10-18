@@ -2,9 +2,9 @@
 
 [中文](environment_setup.md) · [Project overview](../README.md) · [Resource options](../tools/RESOURCE_PREPARATION.md)
 
-CPU tools, downloads and model/simulator execution use separate environments. `requirements-dev.txt` installs CPU development dependencies. `pip install -e .` installs this repository's package only. There is no complete fresh-machine GPU installer yet.
+Prepare an experiment in three steps: install the CPU tools, create the selected case's model/simulator environment, and bind checkpoint and asset paths. `requirements-dev.txt` installs CPU development dependencies; `pip install -e .` installs this repository's package. Install GPU dependencies using the table and case guides below.
 
-LingBot prioritizes a separate [RoboTwin case](../benchmarks/static/lingbot_robotwin/README.md), using existing local model and simulator environments. It is not a download-helper preset; its case guide documents paths, versions and the Transformers shared-embedding compatibility handling.
+LingBot prioritizes a separate [RoboTwin case](../benchmarks/static/lingbot_robotwin/README.md), using existing local model and simulator environments. Prepare its local resources using the case guide, which documents paths, versions and Transformers shared-embedding handling.
 
 ## 1. CPU environment
 
@@ -19,7 +19,7 @@ python tools/compare_speedups.py --input examples/speedups/synthetic.json --mark
 python tools/embodied/trajectory_metrics.py --input tools/embodied/examples/smooth.csv
 ```
 
-The dependencies are NumPy, jsonschema, pytest and Ruff. Plotting additionally requires:
+The dependencies are NumPy, SciPy, jsonschema, pytest and Ruff. SciPy supports the RoboTwin pose-rotation checks. Plotting additionally requires:
 
 ```bash
 python -m pip install -r tools/embodied/requirements-plot.txt
@@ -29,7 +29,7 @@ These commands do not require Torch, CUDA, a simulator or model weights. See [CO
 
 ## 2. Separate GPU environments
 
-The following combinations were used in local experiments. They are compatibility evidence, not complete dependency lock files.
+The following combinations were used in local experiments. Install them alongside each case's dependency files and upstream setup guide, then complete the preflight and GPU rollout checks in Section 5.
 
 | Dependency | π0.5 + LIBERO | Cosmos + LIBERO | Cosmos + RoboCasa |
 | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ The local Cosmos stack uses Transformer Engine `2.2+cu128.torch27` and NATTEN `0
 Core model execution code now lives in `src/robotics_bench/models/`, selected by the default `--model-runtime owned`. Common frameworks, loaders and simulators remain external dependencies. Optional fusion requires Triton in the model environment. Integer source and pinned CUTLASS headers are maintained inside robotics; compilation still requires a local CUDA development toolkit, with CUDA 12.8 used for the Ada build. See the [operator build guide](../src/robotics_kernels/README.md) for paths and architecture selection. FP4/FP8 validation on Blackwell remains pending. Per-round figures use the external profile-visualizer skill with CairoSVG/Cairo in a separate rendering environment; see the [inference benchmark](../benchmarks/inference/README.md).
 
 - **π0.5:** supply a VLASH sim evaluator compatible with this repository's arguments and observation-history protocol. Use a native LeRobot π0.5 LIBERO checkpoint, not VLASH-finetuned weights. The tested external source contains local changes; a package version alone does not establish compatibility. Preflight checks evaluator fields, and manifests record source identity.
-- **Cosmos:** follow the [upstream setup](https://github.com/NVlabs/cosmos-policy/blob/main/SETUP.md) for model dependencies and configure LIBERO and RoboCasa separately. The local environments reused existing Cosmos packages; a complete installation from an empty machine has not been validated.
+- **Cosmos:** follow the [upstream setup](https://github.com/NVlabs/cosmos-policy/blob/main/SETUP.md) for model dependencies and configure LIBERO and RoboCasa separately. The validated environments reused existing Cosmos packages. On a new machine, follow upstream installation and verify model loading, rendering and control with a single episode.
 - **RoboCasa:** use the [compatible fork](https://github.com/moojink/robocasa-cosmos-policy); tested commit: `edd9a328b3ec98050f42d194c1419307a79c4d87`. Use the controller configuration supplied by Cosmos. See the [official RoboCasa instructions](https://github.com/NVlabs/cosmos-policy/blob/main/ROBOCASA.md).
 
 Keep the two robosuite versions in separate environments. A case requires a working NVIDIA driver and headless EGL/OpenGL setup. Video output also needs imageio and an FFmpeg backend. Check the selected runtime:
@@ -161,10 +161,14 @@ Completed runs write `episode-summary.md` and `.json`. Videos are disabled by de
 | Old container source paths | Pass a valid `--robocasa-source`; inspect the runtime and editable installation |
 | Initialization differs from reference | Match task, layout/style, environment seed and asset version; inspect `initializations/` |
 | Rendering or recording fails | Check EGL, MuJoCo, imageio, FFmpeg and device selection in the case environment |
-| Conda XML/Matplotlib reports `XML_SetReparseDeferralEnabled` | Check that Python and libexpat match; a local verification workaround is not a project-wide launcher requirement |
+| Conda XML/Matplotlib reports `XML_SetReparseDeferralEnabled` | Install matching Python and libexpat in the selected environment and verify XML imports before running the plotting tools |
 
-Dependency checks, resource preparation and a successful GPU rollout establish different levels of readiness. Cross-machine installation still requires verifying upstream dependencies.
+For a first run, check dependency imports, resource preflight and a single GPU episode in that order. These verify runtime libraries, file completeness and actual model/simulator execution.
 
 ## KINETIX dynamic case
 
-KINETIX uses an isolated Python 3.11/JAX runtime. The flow model, environment, Jax2D physics, twelve levels and small render textures are maintained in this repository; only checkpoint parameters and framework dependencies are external. Configure `ROBOTICS_KINETIX_PYTHON` and `ROBOTICS_KINETIX_POLICY_DIR`, then follow the [case guide](../benchmarks/dynamic/kinetix/README.md). The runtime requirement file records the tested library versions; a fresh-machine GPU installation has not yet been independently validated. No automatic model/data download occurs during evaluation.
+KINETIX uses an isolated Python 3.11/JAX runtime. The flow model, environment, Jax2D physics, twelve levels and small render textures are maintained in this repository; only checkpoint parameters and framework dependencies are external. Configure `ROBOTICS_KINETIX_PYTHON` and `ROBOTICS_KINETIX_POLICY_DIR`, then follow the [case guide](../benchmarks/dynamic/kinetix/README.md). The runtime requirement file records the tested library versions. Prepare the checkpoint locally, install those dependencies and complete native validation on the target GPU before a study.
+
+## DynamicVLA + DOM
+
+Use separate model and Isaac Python environments. The [case guide](../benchmarks/dynamic/dynamicvla_dom/README.md) provides dependency files, path templates and launch commands. Model and DOM execution source are maintained in this repository; bind the local checkpoint, tokenizer/backbone cache, DOM scenes/textures and Franka assets explicitly. The offline launcher supports native non-streaming and streaming, with MP4 recording enabled by default.

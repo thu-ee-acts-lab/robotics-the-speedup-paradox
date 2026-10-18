@@ -10,9 +10,9 @@
 
 [Paper PDF](https://arxiv.org/pdf/2606.28529) · [Citation](#citation) · [Environment setup](docs/environment_setup.en.md) · [Contributing](CONTRIBUTING.md)
 
-Embodied inference and closed-loop evaluation code for the paper above. With a fixed model, task and scene, study how quantization, asynchronous execution and sampling steps jointly affect inference latency, task success and the number of actions needed to finish a task.
+Connect inference optimization to task-level outcomes. This repository provides model engines, low-precision operators and closed-loop evaluation for the paper above. Compare quantization, asynchronous execution and sampling steps on matched tasks, then measure their effects on inference latency, success rate and action count.
 
-This repository is a development preview. The sections below describe the implementation on `main`; each case guide specifies its environment, resources and validation scope. Model weights and large assets are prepared separately. A license for project-owned code has not yet been selected; see [licensing and provenance](#license).
+Start with a supported case below, prepare its model and simulator environment, and run a baseline plus the optimization you want to evaluate. Each guide links the required resources, commands and validation records. [Licensing and source provenance](THIRD_PARTY_NOTICES.md) are tracked separately.
 
 [Overview](#overview) · [Supported tasks](#cases) · [Quick start](#quickstart) · [Architecture](#architecture) · [Metrics and outputs](#metrics)
 
@@ -22,12 +22,22 @@ This repository is a development preview. The sections below describe the implem
 
 **Faster inference does not necessarily finish a task faster.** The paper introduces TISED (Task-level Inference Speedup Effect Decomposition) to analyze speed–quality trade-offs in closed-loop execution. Static tasks may require more action chunks as action quality degrades. Dynamic tasks also depend on observation freshness and object motion, and hardware latency changes these trade-offs. [Paper](https://arxiv.org/abs/2606.28529)
 
-The repository supports four areas of experimentation:
+The implementation separates four parts of an experiment:
 
 - **Inference and lightweight execution**: separate inference engines, repository-owned model hot paths, and optional BF16 fusion, CUDA Graph, INT8/INT4 and progressive quantization.
 - **Static evaluation**: per-case comparisons of synchronous execution and the paper's historical-observation abstraction, `paper_async`.
 - **Dynamic evaluation**: sampling-step and virtual-latency experiments in KINETIX, plus native streaming execution in DynamicVLA + DOM.
 - **Timing and statistics**: separate inference latency, control-step and task-success records, with speedups at distinct levels relative to a fixed baseline.
+
+### Choose an experiment
+
+| Goal | Start here |
+| --- | --- |
+| Replace selected Cosmos DiT layers with INT4 | [Progressive T0–T10 selection](docs/protocols/progressive-quantization.md) |
+| Compare sync and paper-style observation delay | The static case guides below |
+| Vary sampling steps and simulated latency | [KINETIX experiment workflow](docs/kinetix-latency-study.md) |
+| Run a moving-object task with streaming inference | [DynamicVLA + DOM](benchmarks/dynamic/dynamicvla_dom/README.md) |
+| Measure complete-policy latency and task-level speedup | [Inference benchmark](benchmarks/inference/README.md) and [metric definitions](docs/protocols/speedup-metrics.md) |
 
 <a id="cases"></a>
 
@@ -153,7 +163,7 @@ flowchart TB
     dynamic_runner --> artifacts
 ```
 
-Each group represents only the supported case bindings. The [architecture guide](docs/architecture.md) describes responsibilities, call paths and action lifecycles. The [operator guide](src/robotics_kernels/README.md) covers formats, loading, packing and execution layers.
+The diagram groups the case bindings listed above. The [architecture guide](docs/architecture.md) describes responsibilities, call paths and action lifecycles. The [operator guide](src/robotics_kernels/README.md) covers formats, loading, packing and execution layers.
 
 <a id="metrics"></a>
 

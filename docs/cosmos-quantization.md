@@ -1,14 +1,15 @@
 # Cosmos quantization and VAE optimization
 
-The current Cosmos quantization implementation phase is complete: fixed W8A8
-and W4A4 inference, progressive DiT coverage, owned kernels, and shared LIBERO /
-RoboCasa VAE optimizations are integrated. This is an implementation and
-performance milestone; quantized full-suite task quality is still unverified.
-All optimization switches remain explicit and disabled by default.
+Run Cosmos with W8A8, W4A4 or progressive mixed precision, and combine DiT
+optimizations with shared LIBERO / RoboCasa VAE execution. The recipe below
+connects each switch to its implementation, timing boundary and measured result.
+Enable the selected switches explicitly; the default execution is unoptimized BF16.
 
-## Supported boundary
+<a id="supported-boundary"></a>
 
-| Item | Implemented and evaluated | Limit |
+## Model, format and execution configuration
+
+| Item | Configuration | Application conditions |
 | --- | --- | --- |
 | Models | Cosmos-Policy-LIBERO-Predict2-2B and Cosmos-Policy-RoboCasa-Predict2-2B | Each case requires its own checkpoint, statistics and text cache |
 | Integer scope | 280 Linear sites in 28 DiT blocks: self/cross-attention Q/K/V/out and both MLP projections | VAE and sensitive noncandidate operations retain native precision |
@@ -18,17 +19,18 @@ All optimization switches remain explicit and disabled by default.
 | Execution | One serialized model instance, CPU observation to CPU action chunk | No concurrent requests, planning or future-image decoding in the optimized action boundary |
 
 Integer source and the pinned CUTLASS headers are maintained inside this package.
-There is no runtime import from a sibling VLM project or local quantization
-prototype. See the [kernel guide](../src/robotics_kernels/README.md) and
+The runtime loads these repository-owned implementations directly. See the
+[kernel guide](../src/robotics_kernels/README.md) and
 [third-party notices](../THIRD_PARTY_NOTICES.md) for build and provenance details.
 Loading frameworks, the compatible Cosmos VAE/attention libraries, simulator
 packages, weights and assets remain separate dependencies.
 
 ## Starting recipe for performance experiments
 
-The recipe below retains native DiT normalization and attention. Quantization
-itself is lossy. Fixed-input equality for a fusion is always assessed against the
-same-precision reference, not used as a claim that INT4 equals BF16.
+The recipe retains native DiT normalization and attention. Evaluate fusion
+equality against the same-precision reference, and quantify lossy INT8/INT4
+action differences against BF16. Closed-loop evaluation measures the resulting
+task success rate.
 
 | Switch | Purpose |
 | --- | --- |
@@ -40,9 +42,9 @@ same-precision reference, not used as a claim that INT4 equals BF16.
 | `vae_norm_fusion`, `vae_silu_fusion` | Keep native VAE channel reduction and fuse subsequent pointwise work |
 | `vae_condition_prefix` | Skip complete encoder chunks outside the required conditioning prefix |
 
-Tactic `1` is the measured starting choice on this Ada device, not a universal
-dispatch optimum. Select the target architecture explicitly when building;
-`TORCH_CUDA_ARCH_LIST=8.9` describes the measured Ada machine only.
+Start with tactic `1` on the measured Ada setup. Select the target architecture
+explicitly when building (`TORCH_CUDA_ARCH_LIST=8.9` for Ada), and benchmark
+tactics on the intended device.
 
 Activate the case's model environment and load its resource variables using the
 [environment guide](environment_setup.md). Obtain a raw observation with
@@ -143,8 +145,9 @@ BF16. Across its 9 checks, maximum action differences from original BF16 are
 0.418804 for INT8 and 1.107105 for INT4; the optimized BF16 actions are exact.
 Round12 does not independently isolate INT8 VAE-off/on equality. The LIBERO timing
 instruction was "put both the alphabet soup and the tomato sauce in the basket".
-These are bounded observations, not full-suite success rates or portable latency
-guarantees. Quantized task quality remains experimental.
+These measurements cover the declared saved observations, seeds and Ada setup.
+Use the case runners to measure success rate on the desired task/initial-state
+set; this snapshot contains fixed-input timing and action checks.
 
 Raw traces, action arrays, inputs, measurements, ledgers and generated figures
 remain outside Git. Each benchmark output directory records its source and input
@@ -175,7 +178,6 @@ VAE switches above. Control-step and paper-model speedups follow the separate
 [speedup protocol](protocols/speedup-metrics.md), including failure-budget totals
 and omission of success-conditioned speedups when a configuration has no successes.
 
-This phase does not claim calibrated quantization, retraining, full-suite quality,
-new hardware validation, or a global performance limit. Those remain separate
-work items. PI0.5 quantization remains limited in priority to its text/LLM path;
-its diffusion/action expert is deferred.
+For a new experiment, retain the checkpoint, input set, sampling configuration
+and hardware identity with each result. PI0.5 uses its separate text/LLM scope;
+the Cosmos tier map applies to the 280 DiT candidates described above.
