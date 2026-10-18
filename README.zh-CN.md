@@ -1,7 +1,7 @@
 # [CoRL 2026] The Speedup Paradox
 
 [![arXiv](https://img.shields.io/badge/arXiv-2606.28529-b31b1b.svg)](https://arxiv.org/abs/2606.28529)
-[![CPU CI](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
+[![CPU CI](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
 
 [English](README.md) | **中文**
 
@@ -68,7 +68,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 推荐 Python 3.11 或 3.12；这些工具无需 GPU、checkpoint 或模拟器：
 
 ```bash
-git clone https://github.com/Ther-nullptr/robotics-the-speedup-paradox.git
+git clone https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox.git
 cd robotics-the-speedup-paradox
 python -m venv .venv
 source .venv/bin/activate
@@ -213,7 +213,7 @@ KINETIX 和 DOM 使用各自入口提供的汇总。生成的实验数据、视�
 
 ## 贡献、许可与致谢
 
-欢迎通过 [Issues](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/issues) 反馈问题，或按[贡献指南](CONTRIBUTING.md)提交 PR。公共 CI 运行 CPU 契约和行为检查；GPU、模型资源与模拟器验收按具体 case 单独完成。
+欢迎通过 [Issues](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/issues) 反馈问题，或按[贡献指南](CONTRIBUTING.md)提交 PR。公共 CI 运行 CPU 契约和行为检查；GPU、模型资源与模拟器验收按具体 case 单独完成。
 
 本项目自有代码的许可证尚未确定。第三方源码保留各自许可，其中 DynamicVLA/DOM 派生代码受 S-Lab 非商业条款约束；权重与数据的许可分别适用。来源、版本和移植边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 及各模块的 `PROVENANCE.json`。
 

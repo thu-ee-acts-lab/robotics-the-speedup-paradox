@@ -1,7 +1,7 @@
 # [CoRL 2026] Inference Engine for "The Speedup Paradox: Rethinking Inference Speed-Quality Trade-off in Embodied Tasks"
 
 [![arXiv](https://img.shields.io/badge/arXiv-2606.28529-b31b1b.svg)](https://arxiv.org/abs/2606.28529)
-[![CPU CI](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
+[![CPU CI](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
 
 **English** | [中文](README.zh-CN.md)
 
@@ -67,7 +67,7 @@ Optimizations are explicitly enabled within each engine's supported scope. Modul
 Python 3.11 or 3.12 is recommended. These tools require no GPU, checkpoint or simulator:
 
 ```bash
-git clone https://github.com/Ther-nullptr/robotics-the-speedup-paradox.git
+git clone https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox.git
 cd robotics-the-speedup-paradox
 python -m venv .venv
 source .venv/bin/activate
