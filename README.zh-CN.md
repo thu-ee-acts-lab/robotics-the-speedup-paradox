@@ -15,7 +15,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 从下表选择 case，准备对应的模型与模拟器环境，再运行基线和待评估的优化方案。各指南提供资源、命令和验证记录；[许可与来源](THIRD_PARTY_NOTICES.md)单独维护。
 
-[研究概览](#overview) · [支持的任务](#cases) · [快速开始](#quickstart) · [项目架构](#architecture) · [指标与输出](#metrics)
+[研究概览](#overview) · [支持的任务](#cases) · [快速开始](#quickstart) · [项目架构](#architecture) · [指标与输出](#metrics) · [贡献者](#contributors)
 
 <a id="overview"></a>
 
@@ -189,6 +189,17 @@ python tools/summarize_experiment.py \
 ```
 
 KINETIX 和 DOM 使用各自入口提供的汇总。生成的实验数据、视频、图表和报告保存在被忽略的 `runs/`；本机配置与临时记录放在 `.local/`。
+
+<a id="contributors"></a>
+
+## 贡献者
+
+<a href="https://github.com/MarwinChen"><img src="https://avatars.githubusercontent.com/u/161196436?v=4&amp;s=96" width="64" height="64" alt="MarwinChen 的 GitHub 头像" /></a>
+
+**[Chen Junli (@MarwinChen)](https://github.com/MarwinChen)**
+
+- **LingBot-VA 评估工具：** 汇总逐回合成功率、耗时和动作稳定性，输出 CSV、JSON 与 Markdown。 [PR #8](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/pull/8)
+- **KV 读取窗口剪枝契约：** 独立的视觉/动作 token 预算、CPU 参考选择器与边界测试。 [PR #10](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/pull/10)
 
 <a id="citation"></a>
 
