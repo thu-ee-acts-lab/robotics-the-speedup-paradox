@@ -14,7 +14,7 @@ Connect inference optimization to task-level outcomes. This repository provides 
 
 Start with a supported case below, prepare its model and simulator environment, and run a baseline plus the optimization you want to evaluate. Each guide links the required resources, commands and validation records. [Licensing and source provenance](THIRD_PARTY_NOTICES.md) are tracked separately.
 
-[Overview](#overview) · [Supported tasks](#cases) · [Quick start](#quickstart) · [Architecture](#architecture) · [Metrics and outputs](#metrics)
+[Overview](#overview) · [Supported tasks](#cases) · [Quick start](#quickstart) · [Architecture](#architecture) · [Metrics and outputs](#metrics) · [Contributors](#contributors)
 
 <a id="overview"></a>
 
@@ -188,6 +188,17 @@ python tools/summarize_experiment.py \
 ```
 
 KINETIX and DOM provide their own summaries. Generated experiment data, videos, figures and reports stay in ignored `runs/` directories; machine configuration and scratch records stay in `.local/`.
+
+<a id="contributors"></a>
+
+## Contributors
+
+<a href="https://github.com/MarwinChen"><img src="https://avatars.githubusercontent.com/u/161196436?v=4&amp;s=96" width="64" height="64" alt="MarwinChen's GitHub avatar" /></a>
+
+**[Chen Junli (@MarwinChen)](https://github.com/MarwinChen)**
+
+- **LingBot-VA evaluation tooling:** per-episode success, timing and action-stability summaries with CSV, JSON and Markdown output. [PR #8](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/pull/8)
+- **KV read-window pruning contracts:** separate visual/action token budgets, a CPU reference selector and boundary tests. [PR #10](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/pull/10)
 
 <a id="citation"></a>
 
