@@ -5,10 +5,10 @@ a CPU action chunk. Model loading, weight packing, compilation, CUDA Graph
 capture and warmup are separate. Simulator/control-period timing is not included.
 All console output and generated report labels are English.
 
-For the completed Cosmos implementation phase, start with the
-[Cosmos quantization guide](../../docs/cosmos-quantization.md): supported integer
-formats, a shared LIBERO/RoboCasa recipe, measured snapshots, numerical limits
-and rollback. This page provides the detailed benchmark and switch interfaces.
+Start with the [Cosmos quantization guide](../../docs/cosmos-quantization.md)
+for integer formats, a shared LIBERO/RoboCasa recipe and measured comparisons.
+Use this page to configure benchmark inputs, optimization switches and output
+records, then evaluate selected variants with the case runners.
 
 Model execution code is maintained in `src/robotics_bench/models/`. PI0.5 owns its
 PaliGemma/Gemma/SigLIP forwards; Cosmos owns its policy, sampler and DiT forwards.
@@ -52,10 +52,11 @@ export CUDA_HOME=/path/to/compatible-cuda
 Integer formats use signed INT8 or packed signed INT4, dynamic per-row activation
 scales, per-output-channel weight scales, S32 accumulation and a BF16 epilogue.
 Integer source and its pinned CUTLASS headers are packaged inside robotics;
-the integer build does not use `ROBOTICS_CUTLASS_ROOT` or another project's kernels.
+the build resolves headers from `src/robotics_kernels/ampere_ada/third_party/cutlass/`.
 Activation prepare/pack and output conversion are part of the timing. Tactics 0
 through 7 select explicit CUTLASS tiles; compare them on real shapes with
-`--integer-tactic`. INT4/INT8 are not FP4/FP8, and low precision is not lossless.
+`--integer-tactic`. INT4/INT8 use integer encodings; FP4/FP8 use floating-point formats.
+Report action differences for each low-precision candidate.
 FP4/FP8 sources and build tooling are preserved under
 `src/robotics_kernels/blackwell/` and `tools/build_blackwell.py`; they require a
 compatible Blackwell device/toolchain and separate hardware validation.
@@ -71,8 +72,7 @@ and DiT adapter; their observations, checkpoints and VAE settings stay case-spec
 Only boundaries whose consumers are all integer projections use the fused path;
 other boundaries retain native normalization. The kernel preserves BF16 rounding
 between normalization, multiplication and addition, but its FP32 reduction order
-can differ from native LayerNorm. Treat it as a numerical candidate, not a
-guaranteed lossless switch, and inspect the recorded same-precision action drift.
+can differ from native LayerNorm. Evaluate its recorded same-precision action drift as a numerical candidate.
 It is disabled by default. Remove only `--enable norm_modulation_quant` to return
 to native LayerNorm plus the existing modulation/packing fusion.
 
@@ -98,10 +98,9 @@ separate diagnostic traces/tables. With `--profile-skill`, every completed round
 also produces timestamped PNG/SVG/Markdown, an interactive HTML page and its
 manifest under `figures/`. Install CairoSVG/Cairo only in the rendering environment.
 
-Exact fixed-input action equality is reported separately from quantization drift.
-It does not establish task-suite success rate. Quantized configurations remain
-experimental until the corresponding closed-loop evaluation passes. Historical
-ratios from different measurement windows are not multiplied.
+Report fixed-input action equality and quantization drift separately, then
+measure task success with a matched closed-loop evaluation. Compute each speedup
+directly against the BF16 anchor in the same measurement cohort.
 
 For a rollout, the existing case launchers accept `--model-runtime owned`,
 repeatable `--enable`, `--precision`, `--quant-scope` and `--integer-tactic`.
@@ -316,7 +315,8 @@ worldmodel revision `51529dc48047c61c17bd25fc088c8569c005ddd1`,
 enters before any CUTLASS convolution plan reads padding and restores both the
 forward method and padding on exit. Asymmetric downsample padding is untouched.
 Changing the convolution descriptor may select a different kernel and change
-floating-point rounding; fewer padding calls alone do not establish a speedup.
+floating-point rounding. Evaluate the complete-policy latency and action
+differences with this option on and off.
 
 For the current action-only Cosmos path, the relevant VAE work is encoding;
 future-image decoding is disabled. Worldmodel's steady decoder batching,

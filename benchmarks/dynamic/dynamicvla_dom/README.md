@@ -3,22 +3,21 @@
 Single-environment Franka DOM evaluation with repository-owned DynamicVLA model,
 preprocessing, streaming queue and DOM scene/control source. Isaac Sim/Isaac Lab,
 PyTorch/LeRobot/Transformers, checkpoints and assets remain external dependencies.
-The runtime does not import a DynamicVLA or dynamic-experiments source checkout.
+Execution uses the model and DOM source packaged in this repository.
 
-The first integration supports `native-non-streaming` (default) and
-`native-streaming` (`--streaming`). It does not implement `paper_sync`, static
-`paper_async`, latency injection, Kinetix command blending, timestep subdivision
-or quantization. Native non-streaming still runs beside a continuously evolving
-simulator: while the model generates a new chunk, DOM retains its previous control
-target. Native streaming generates in a worker, skips expired predicted actions
-and merges indexed action queues.
+Choose `native-non-streaming` (default) or `native-streaming` (`--streaming`).
+Both run beside a continuously evolving simulator. Non-streaming retains the
+previous control target while generating the next chunk. Streaming generates
+in a worker, skips expired predicted actions and merges indexed action queues.
+This entry uses native model precision and the DOM timing protocol.
 
 ## Environments and resources
 
 Use separate model and simulator environments. The upstream setup describes
 Python 3.10, PyTorch 2.7.1, Isaac Sim 4.5.0 and Isaac Lab 2.2.1. The local model
 environment used during integration is Python 3.11 with PyTorch 2.7.1 and
-Transformers 5.2.0; installation on a clean machine requires separate validation.
+Transformers 5.2.0. On a new machine, install the dependencies below and verify
+resource loading and a single episode before a larger evaluation.
 
 - Model dependencies: [requirements-model.txt](requirements-model.txt).
 - Simulator additions: [requirements-simulator.txt](requirements-simulator.txt);
@@ -77,7 +76,7 @@ The initial adapter fixes native physics dt to 0.04 s and control decimation to1
 Camera periods and the native task success/timeout terms come from the DOM test
 configuration. Waiting for model results never pauses the scene. Simulator wall
 pacing and model `dt_scale` compensation remain enabled; their actual values are
-recorded, not treated as proof of exact wall/simulation clock equivalence.
+recorded alongside separate simulation and wall clocks.
 
 Each observation includes its episode, index, instruction and simulation/wall
 clocks. Actions echo their source identity. Terminal/ACK messages are retained;
@@ -110,22 +109,22 @@ chunks are counted separately.
 Success rate includes successful and failed task episodes; overall control-step
 statistics penalize failures at the declared budget. Mean generated chunks is
 conditioned on success and undefined at zero successes. Counts come from model
-generation events, never `ceil(control_steps / chunk_length)`. Applied chunks
-count unique generated chunks actually used by the simulator, including tails.
+generation events. Applied chunks count unique generated chunks actually used
+by the simulator, including tails.
 
-`model_host_duration_s` is a host-side model call span, not a CUDA-synchronized
-latency benchmark. Client action selection can include cache pops, queue access
-and pacing. Do not report either as independently measured complete-policy GPU
-latency or substitute host evaluation time for task simulation duration.
+`model_host_duration_s` records the host-side model call span without explicit
+CUDA synchronization. Client action selection includes cache pops, queue access
+and pacing. Use these fields to inspect execution; complete-policy GPU latency
+requires a synchronized benchmark, and task duration uses the simulation clock.
 
 ## Source and distribution
 
 [Model provenance](../../../src/robotics_bench/models/dynamicvla/PROVENANCE.json)
 and [DOM provenance](../../../src/robotics_bench/dynamicvla_dom/native/PROVENANCE.json)
 record the selected local DynamicVLA revision, original file hashes and migration
-changes. The source snapshot includes documented local compatibility fixes;
-it is not claimed to be a pristine upstream release. Derived files retain S-Lab's
-non-commercial license; the Franka configuration retains its Isaac Lab BSD notice.
+changes, including the local compatibility fixes in this source snapshot.
+Derived files retain S-Lab's non-commercial license; the Franka configuration
+retains its Isaac Lab BSD notice.
 See [third-party notices](../../../THIRD_PARTY_NOTICES.md). Model and asset terms
 remain separate and their files are not distributed in this repository.
 
@@ -135,9 +134,10 @@ The integration was checked on RTX 6000 Ada GPUs with the local DOM checkpoint:
 fixed-input non-streaming output matched the local source implementation exactly;
 one native non-streaming episode and two consecutive native streaming episodes
 completed with MP4, control ledgers and generation/applied-chunk cross-checks.
-These are integration smoke checks, not a full DOM benchmark or a performance
-comparison. Built wheel contents were checked for owned source and retained licenses. Public CI uses CPU-only contract/lifecycle tests and downloads
-neither models nor simulator assets.
+This evidence covers fixed-input equivalence and three integration episodes.
+Task-suite quality and performance comparisons require their own declared task
+and seed sets. Built wheels were checked for owned source and retained licenses;
+public CI runs CPU contract/lifecycle tests with local synthetic fixtures.
 
 The validated local simulator uses Python 3.10.15, Isaac Lab distribution version
 0.45.9 and Torch 2.7.0+cu128 with the installed Isaac Sim4.5 runtime. This differs

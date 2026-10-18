@@ -1,7 +1,7 @@
 # Robotics GPU operators
 
-本目录是 robotics 独立维护的算子源码，不在运行时导入工作区的 VLM 项目。
-默认 CPU 安装不加载 Torch、CUDA、Triton 或编译扩展。
+本目录提供robotics独立维护的GPU算子，按融合、整数精度和硬件后端组织。
+CPU安装使用惰性导入；Torch、CUDA、Triton及编译扩展在对应GPU路径中加载。
 
 源码按架构组织，架构目录内部再放对应的 CUDA/C++ 源码：
 
@@ -35,7 +35,7 @@ INT 的公开包装遵循 `from_linear → pack_input → forward_packed/forward
 `forward_gelu` 将 GELU 或 gated GELU 与 activation pack 融合。激活按行、权重按输出
 通道使用动态/静态 float32 scale；INT4 字节的低 nibble 对应前一个元素。
 逻辑 K/N 与物理 padding 分开：K 补齐 128、N 补齐 8，补齐区域为数学零，输出再裁剪。
-这些是当前 kernel 的显式能力，不是模型 hidden-size 硬编码。
+这些对齐规则由kernel格式定义，逻辑维度由调用方传入。
 
 八个明确 tactic 的M/N/K、warp和流水级数位于 `ampere_ada/tactics.py`；0/1保留
 原始配置，2..7扩展窄N、大N、大K和流水深度候选。按真实 shape、设备和完整 Linear
@@ -46,8 +46,8 @@ INT 的公开包装遵循 `from_linear → pack_input → forward_packed/forward
 兼容同时开启两者。权重/scale在初始化时拼接，运行时共享GEMM结果。
 `integer_group_views` 允许消费者直接读取输出切片，省去显式的连续化拷贝；对应激活
 准备支持末维连续、行间有stride的输入。任意不规则布局会明确拒绝，不默默复制。
-`integer_pack_reuse` 让INT4量化与nibble打包复用同一行数据。所有开关独立保留，
-模型级性能不能由合并后的GEMM微测结果推断。
+`integer_pack_reuse` 让INT4量化与nibble打包复用同一行数据。所有开关独立保留；
+选定kernel后，在完整policy入口复核收益。
 
 `ampere_ada/modulation.py` 提供Cosmos的modulation与激活量化融合，保留原BF16
 中间舍入；内部packed carrier同时支持按需提供INT4/INT8，避免混合档位误用格式。
@@ -57,11 +57,11 @@ INT 的公开包装遵循 `from_linear → pack_input → forward_packed/forward
 不属于保留原生归约的配方。它们与原调制打包共用当前文件中的格式和舍入边界。
 `integer_biasless` 为无bias层提供独立尾部处理实验路径；有bias时继续正常计算bias。
 
-目前量化迭代优先Cosmos，π0.5先限于text/LLM。动作专家/diffusion量化暂缓；
-已有可选scope不表示通过了相应任务质量验收。
+量化实验使用Cosmos的DiT scope和π0.5的text/LLM scope。
+各scope的后端命中、动作偏差和任务质量分别记录。
 
-Cosmos本轮固定/渐进整数实现和共享VAE优化已完成阶段验证；启动配方、测量口径、
-默认关闭的实验选项和回退方式见 [Cosmos量化指南](../../docs/cosmos-quantization.md)。
+Cosmos固定/渐进整数精度、共享VAE优化的启动配方、测量口径、
+独立实验开关与回退方式见 [Cosmos量化指南](../../docs/cosmos-quantization.md)。
 
 卷积的CUTLASS迭代器、分块、流水线与数值边界见
 [CONVOLUTION.md](ampere_ada/CONVOLUTION.md)。单算子调优收益必须回到完整policy复核；
@@ -99,5 +99,5 @@ ROBOTICS_GPU_TESTS=1 CUDA_VISIBLE_DEVICES=0 python -m pytest -q tests/gpu
 ```
 
 模型接入位于 `robotics_bench/optimizations/`；完整调用计时和可视化入口见
-[推理实验说明](../../benchmarks/inference/README.md)。算子数值通过不等于闭环质量通过，
-量化输出偏差和实际任务结果分别记录。
+[推理实验说明](../../benchmarks/inference/README.md)。依次检查算子数值、完整policy
+动作偏差和闭环任务结果。

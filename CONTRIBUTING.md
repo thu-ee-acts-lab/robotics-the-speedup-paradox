@@ -60,6 +60,12 @@ gh pr create --draft --base main \
 
 CI和后续审核针对PR中的实际commit；推送修复后更新验证说明。服务器认证不可用时，保留已推送分支、准确的base和PR正文，并明确说明PR尚未创建，不能将本地提交称为已提交PR。
 
+### 文档写作 / Documentation writing
+
+参考 [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill) 的叙事原则：先说明读者能解决的问题和可用能力，再给出命令、配置条件与验证证据。首页用于导航，case指南用于运行，协议文档集中定义精度、时间与统计口径。将重复提醒改为具体条件，阶段过程记录留在本地产物或PR交接中。保留影响使用判断的兼容性、实测结果和许可信息；中英文入口同步维护。
+
+Follow the narrative principles in [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill): lead with the problem and available capabilities, then provide commands, configuration conditions and evidence. Use the homepage for navigation, case guides for execution and protocols for precision, time and metric definitions. Replace repeated warnings with concrete conditions and keep progress logs in local artifacts or PR handoffs. Preserve compatibility requirements, measured results and licensing information that affect use; maintain both language entry points together.
+
 ## 4. 与改动相称的验证 / Proportionate validation
 
 | 改动 / Change | 验证 / Validation |

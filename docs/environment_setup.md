@@ -2,9 +2,9 @@
 
 [English](environment_setup.en.md) · [项目首页](../README.zh-CN.md) · [资源准备参数](../tools/RESOURCE_PREPARATION.md)
 
-本仓库将CPU工具、资源下载与模型/模拟器运行分开。`requirements-dev.txt` 用于CPU开发；`pip install -e .` 仅安装本仓Python包。GPU环境需要对应case的兼容外部源码和依赖，当前没有统一的一键新机安装器。
+按三个步骤准备实验：安装CPU工具，建立所选case的模型/模拟器环境，再绑定checkpoint和资产路径。`requirements-dev.txt` 安装CPU开发依赖，`pip install -e .` 安装本仓Python包；GPU依赖按下表和case指南分别安装。
 
-LingBot优先通过 [RoboTwin独立case](../benchmarks/static/lingbot_robotwin/README.md) 接入，复用已有模型端和仿真端环境。该入口仅接受本地资源，未加入通用下载工具的case列表；具体版本、路径和Transformers共享embedding兼容处理见case说明。
+LingBot优先通过 [RoboTwin独立case](../benchmarks/static/lingbot_robotwin/README.md) 接入，复用已有模型端和仿真端环境。按case指南准备本地资源；指南列出版本、路径和Transformers共享embedding处理方式。
 
 ## 1. CPU工具环境
 
@@ -29,7 +29,7 @@ python -m pip install -r tools/embodied/requirements-plot.txt
 
 ## 2. 为每个case配置独立GPU环境
 
-以下是已有实验验证过的组合，用于判断依赖兼容性，不是完整依赖锁文件。
+以下版本组合用于已有实验。安装时结合case的依赖文件和上游安装指南，并完成第5节的预检与GPU闭环检查。
 
 | 依赖 | π0.5＋LIBERO | Cosmos＋LIBERO | Cosmos＋RoboCasa |
 | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ Cosmos本机组合使用Transformer Engine `2.2+cu128.torch27`、NATTEN `0.21.0+
 主要模型执行代码现位于本仓 `src/robotics_bench/models/`，默认使用 `--model-runtime owned`，但公共框架、加载器和模拟器依赖仍需配置。可选融合需要模型环境中的Triton；INT源码和固定CUTLASS头文件已在本仓独立维护，构建还需本机CUDA开发工具链，本次Ada构建使用CUDA 12.8。工具链路径与目标架构必须显式指定，见 [算子构建说明](../src/robotics_kernels/README.md)。FP4/FP8尚待Blackwell实机验证。逐轮图表通过外部profile-visualizer skill生成，CairoSVG/Cairo放在独立渲染环境，见 [推理实验入口](../benchmarks/inference/README.md)。
 
 - **π0.5**：需要支持本仓参数与历史观测协议的VLASH sim evaluator，并使用普通LeRobot π0.5 LIBERO权重。现有兼容源码含本地改动，仅安装相同版本号的LeRobot不足以证明接口可用。入口通过AST预检检查evaluator字段，实际源码身份写入manifest。参见 [case依赖边界](../benchmarks/static/pi05_libero/README.md#已验证范围与外部依赖)。
-- **Cosmos**：按 [官方安装说明](https://github.com/NVlabs/cosmos-policy/blob/main/SETUP.md) 配置模型依赖，分别安装LIBERO和RoboCasa的环境栈。当前普通用户环境复用了本机已有Cosmos packages，未验证从空机器完整重建；这些复用路径不会写入公共模板。
+- **Cosmos**：按 [官方安装说明](https://github.com/NVlabs/cosmos-policy/blob/main/SETUP.md) 配置模型依赖，分别安装LIBERO和RoboCasa的环境栈。已验证组合复用了现有Cosmos packages；新机器按上述安装说明准备依赖，再用单回合运行核对模型加载、渲染与控制。公共模板通过占位路径绑定资源。
 - **RoboCasa**：使用 [官方指定fork](https://github.com/moojink/robocasa-cosmos-policy)，已验证commit为 `edd9a328b3ec98050f42d194c1419307a79c4d87`。控制器配置使用Cosmos源码附带的文件。详细安装入口见 [官方RoboCasa说明](https://github.com/NVlabs/cosmos-policy/blob/main/ROBOCASA.md)。
 
 系统需要可用的NVIDIA驱动和无窗口渲染所需的EGL/OpenGL环境；启用视频需要imageio与FFmpeg编码后端。在将要运行实验的解释器中检查：
@@ -180,9 +180,9 @@ bash benchmarks/static/pi05_libero/run.sh \
 | RoboCasa实际加载旧容器路径 | 通过 `--robocasa-source` 提供有效源码；检查选定解释器和editable安装位置 |
 | 初始场景与reference不同 | 使用相同任务、layout/style、环境种子和资产版本；查看 `initializations/` 指纹 |
 | 无法渲染或录制 | 检查case环境中的EGL、MuJoCo、imageio和FFmpeg；GPU选项与模型设备一致 |
-| Conda中XML/Matplotlib导入报 `XML_SetReparseDeferralEnabled` | 检查Python与libexpat是否来自匹配环境；本机验证曾临时预加载配套库，这不是项目默认启动要求 |
+| Conda中XML/Matplotlib导入报 `XML_SetReparseDeferralEnabled` | 在所选环境中安装匹配的Python与libexpat，确认XML导入后再运行绘图工具 |
 
-环境检查通过、资源完整和真实模型闭环成功是不同层级的验证。当前提供已验证组合与显式路径绑定，跨机器完整安装仍需要按外部项目依赖检查。
+首次运行依次检查依赖导入、资源预检和单回合GPU闭环；分别确认运行库、文件完整性以及模型与模拟器的实际调用。
 
 ## KINETIX动态实验环境
 
@@ -204,4 +204,4 @@ bash benchmarks/dynamic/kinetix/run.sh \
 [case指南](../benchmarks/dynamic/dynamicvla_dom/README.md)。运行源码由仓内维护，
 不需要外部DynamicVLA checkout；checkpoint、tokenizer/backbone缓存、DOM USD与纹理
 和本地Franka资源显式绑定。运行入口始终离线，缺少资源时报告错误。
-首版提供native-non-streaming/streaming，默认录制MP4；不接入paper_sync。
+入口提供native-non-streaming/streaming，默认录制MP4。

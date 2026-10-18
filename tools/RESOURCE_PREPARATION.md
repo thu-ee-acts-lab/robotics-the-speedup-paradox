@@ -70,7 +70,7 @@ bash benchmarks/static/pi05_libero/run.sh \
 
 `--libero-root` 指向含 `bddl_files/` 和 `init_files/` 的已安装包目录；这些任务定义与初态随兼容 LIBERO 包提供。工具检查四个 suite 的 40 个 BDDL/初态文件是否成对存在，生成配置以避免首次 import 的交互提示。不提供该参数时保留现有 LIBERO 配置变量，终端会提示尚未生成配置。
 
-本工具不安装 CUDA、Torch、Cosmos、LeRobot、LIBERO 或量化 kernel，也不克隆外部源码。`--source` 和 `--python` 只绑定已有位置。`resources_prepared` 仅表示资源文件准备完成；运行环境兼容性和 GPU 可用性仍由 case 预检与实际运行验证。
+先按 [环境指南](../docs/environment_setup.md) 安装CUDA、Torch、模型和模拟器依赖，再用 `--source` 与 `--python` 绑定已有位置。工具完成后写入 `resources_prepared`，表示资源文件准备就绪；随后执行case预检与单回合GPU运行。
 
 ## 下载内容与已有资源复用
 
@@ -99,7 +99,7 @@ python tools/prepare_resources.py --case cosmos_libero \
   --env-file .local/cosmos-resources.env
 ```
 
-`--reuse NAME=PATH` 可以重复指定；未复用的资源才联网下载。VAE 复用目录必须含 `tokenizer/tokenizer.pth`。本地复用校验必需文件及非空/LFS 占位状态，并记录 `origin=local`，不会声称验证了远端版本或完整内容哈希。π0.5 还会检查 processor JSON 引用的状态文件。需要离线准备时复用所有资源。
+`--reuse NAME=PATH` 可以重复指定；未复用的资源才联网下载。VAE 复用目录必须含 `tokenizer/tokenizer.pth`。本地复用检查必需文件、非空内容与LFS占位状态，并记录 `origin=local`；该记录描述本地文件检查，远端版本与完整内容哈希由相应来源证据确认。π0.5 还会检查 processor JSON 引用的状态文件。需要离线准备时复用所有资源。
 
 下载采用固定的 checkpoint/VAE 版本，保持与已有设置一致；`--revision NAME=COMMIT` 可显式覆盖。没有固定默认版本的资源在下载前解析为具体 commit，一次资源下载使用同一 commit，并记录文件数、字节数和版本。失败后可重跑同一命令，利用 Hub 缓存续传/复用；不会把缺文件、空文件、LFS pointer 或与远端大小不符的文件当作完成。
 

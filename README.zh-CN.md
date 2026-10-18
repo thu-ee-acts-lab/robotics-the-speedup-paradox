@@ -1,7 +1,7 @@
 # [CoRL 2026] The Speedup Paradox
 
 [![arXiv](https://img.shields.io/badge/arXiv-2606.28529-b31b1b.svg)](https://arxiv.org/abs/2606.28529)
-[![CPU CI](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
+[![CPU CI](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml/badge.svg?branch=main)](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/actions/workflows/cpu.yml)
 
 [English](README.md) | **中文**
 
@@ -11,9 +11,9 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 [论文 PDF](https://arxiv.org/pdf/2606.28529) · [引用](#citation) · [环境配置](docs/environment_setup.md) · [贡献指南](CONTRIBUTING.md)
 
-面向上述论文的具身模型推理与闭环评估代码库：固定模型、任务和场景，研究量化、异步执行与采样步数如何共同影响推理耗时、任务成功率和完成任务所需的动作数。
+把推理优化与任务结果连接起来。本仓提供上述论文的模型引擎、低精度算子与闭环评估工具，在匹配的任务场景下比较量化、异步执行和采样步数，联合测量推理耗时、成功率与动作数。
 
-本仓处于开发预览阶段。下文列出当前 `main` 的实现范围；各 case 的环境、资源和验证边界见对应指南。模型权重和大型资产单独准备，项目自有代码的许可证尚待确定，详见[许可与来源](#license)。
+从下表选择 case，准备对应的模型与模拟器环境，再运行基线和待评估的优化方案。各指南提供资源、命令和验证记录；[许可与来源](THIRD_PARTY_NOTICES.md)单独维护。
 
 [研究概览](#overview) · [支持的任务](#cases) · [快速开始](#quickstart) · [项目架构](#architecture) · [指标与输出](#metrics)
 
@@ -23,12 +23,22 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 **更快的单次推理，未必意味着更快完成任务。** 论文提出 TISED（Task-level Inference Speedup Effect Decomposition），分析推理优化在闭环交互中的速度与质量权衡：静态任务可能因动作质量下降而需要更多动作块；动态任务则还受到观测时效与物体运动的影响，硬件延迟会改变这种权衡。[论文](https://arxiv.org/abs/2606.28529)
 
-仓库提供四类实验能力：
+实验由四部分组成：
 
 - **模型推理与轻量化**：独立推理引擎、仓内模型热路径，以及可选 BF16 融合、CUDA Graph、INT8/INT4 与渐进量化。
 - **静态闭环评估**：按 case 比较同步执行与论文历史观测抽象 `paper_async`。
 - **动态闭环评估**：KINETIX 的采样步数与虚拟延迟实验，以及 DynamicVLA＋DOM 的原生流式执行。
 - **计时与统计**：分别记录推理时间、控制步数和任务成功率，按固定 baseline 计算不同层级的加速比。
+
+### 选择实验
+
+| 目标 | 从这里开始 |
+| --- | --- |
+| 将部分 Cosmos DiT 层替换为 INT4 | [渐进式 T0–T10 配置](docs/protocols/progressive-quantization.md) |
+| 比较同步与论文历史观测异步 | 下表中的静态 case 指南 |
+| 改变采样步数和模拟延迟 | [KINETIX 实验工作流](docs/kinetix-latency-study.md) |
+| 在运动物体任务中运行流式推理 | [DynamicVLA＋DOM](benchmarks/dynamic/dynamicvla_dom/README.md) |
+| 测量完整 policy 时延与任务级加速比 | [推理 benchmark](benchmarks/inference/README.md)和[指标定义](docs/protocols/speedup-metrics.md) |
 
 <a id="cases"></a>
 
@@ -58,7 +68,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 推荐 Python 3.11 或 3.12；这些工具无需 GPU、checkpoint 或模拟器：
 
 ```bash
-git clone https://github.com/Ther-nullptr/robotics-the-speedup-paradox.git
+git clone https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox.git
 cd robotics-the-speedup-paradox
 python -m venv .venv
 source .venv/bin/activate
@@ -154,7 +164,7 @@ flowchart TB
     dynamic_runner --> artifacts
 ```
 
-各分组只代表已绑定 case 的集合。详细职责、调用链和动作生命周期见[架构指南](docs/architecture.md)；算子的格式、加载、打包与执行分层见[算子系统](src/robotics_kernels/README.md)。
+图中各分组对应上表的 case 绑定关系。详细职责、调用链和动作生命周期见[架构指南](docs/architecture.md)；算子的格式、加载、打包与执行分层见[算子系统](src/robotics_kernels/README.md)。
 
 <a id="metrics"></a>
 
@@ -203,7 +213,7 @@ KINETIX 和 DOM 使用各自入口提供的汇总。生成的实验数据、视�
 
 ## 贡献、许可与致谢
 
-欢迎通过 [Issues](https://github.com/Ther-nullptr/robotics-the-speedup-paradox/issues) 反馈问题，或按[贡献指南](CONTRIBUTING.md)提交 PR。公共 CI 运行 CPU 契约和行为检查；GPU、模型资源与模拟器验收按具体 case 单独完成。
+欢迎通过 [Issues](https://github.com/thu-ee-acts-lab/robotics-the-speedup-paradox/issues) 反馈问题，或按[贡献指南](CONTRIBUTING.md)提交 PR。公共 CI 运行 CPU 契约和行为检查；GPU、模型资源与模拟器验收按具体 case 单独完成。
 
 本项目自有代码的许可证尚未确定。第三方源码保留各自许可，其中 DynamicVLA/DOM 派生代码受 S-Lab 非商业条款约束；权重与数据的许可分别适用。来源、版本和移植边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 及各模块的 `PROVENANCE.json`。
 

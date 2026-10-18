@@ -1,8 +1,8 @@
 # KINETIX：原生时间下的 latency–quality 实验
 
-本case在仓内维护 RTC flow policy、KINETIX 环境、Jax2D物理核心、12个关卡定义和所需渲染素材。运行不导入参考仓库源码，不需要外部Kinetix/Jax2D安装包；外部资源仅包括兼容的Python计算依赖和显式提供的可信checkpoint。
+本case在仓内维护 RTC flow policy、KINETIX 环境、Jax2D物理核心、12个关卡定义和所需渲染素材。执行源码随包维护，运行时配置兼容的Python计算依赖和显式提供的可信checkpoint。
 
-当前入口使用JAX/Flax、symbolic观测、6维motor/thruster动作、8步预测块，默认每4条控制指令重新推理。质量轴为flow采样步数，时间轴为显式注入的虚拟延迟；它是动态任务的动作可用性重放，不使用静态case的 `paper_async`。
+当前入口使用JAX/Flax、symbolic观测、6维motor/thruster动作、8步预测块，默认每4条控制指令重新推理。质量轴为flow采样步数，时间轴为显式注入的虚拟延迟；通过动态任务的动作可用性重放，分别控制策略计算质量和结果到达时间。
 
 单次运行使用本页的 `run.sh`。固定N延迟扫描、四档硬件映射、512种子配对评估和四联图分析见 [硬件延迟实验工作流](../../../docs/kinetix-latency-study.md)。新命令使用 `coarse`／`fine` 两种模式。
 
@@ -10,7 +10,7 @@
 
 独立运行环境要求Python 3.11。本机验证的主要组合为JAX 0.4.35、jaxlib 0.4.34、Flax 0.10.2、NumPy 1.26.4和CUDA 12 JAX插件。依赖列表见 [requirements-runtime.txt](requirements-runtime.txt)。CPU契约/统计测试不安装这套运行栈。
 
-新环境安装方式如下；这是按已验证版本整理的安装配方，尚未在空白机器完成独立GPU安装验收：
+按已验证版本安装依赖，随后使用下方预检和 `--validate-native` 检查目标机器：
 
 ```bash
 python3.11 -m venv .local/envs/kinetix
@@ -53,7 +53,7 @@ bash benchmarks/dynamic/kinetix/run.sh \
 
 `--episodes` 是每个“关卡×flow步数×延迟”单元的回合数，上例共8回合。所有单元使用相同的seed列表；环境、动作噪声和policy使用独立随机流。`--levels all` 覆盖12个内置关卡。每个关卡绑定自己的checkpoint，不把模型与环境任意组合。
 
-`--max-steps` 可以设置更小的控制步预算，但不能超过原生任务预算。CPU运行可以用 `--cpu` 代替 `--gpu`。每次真实运行使用新输出目录。当前是单环境逐回合执行；JAX编译policy与物理内核，不宣称已实现跨环境并行或真实后台推理。
+`--max-steps` 可以设置更小的控制步预算，但不能超过原生任务预算。CPU运行可以用 `--cpu` 代替 `--gpu`。每次真实运行使用新输出目录。runner按单环境逐回合执行，JAX编译policy与物理内核。
 
 完整回合覆盖定义为：每个指定seed从本关卡初态开始，遇到原生成功/失败接触或预算耗尽时停止，不自动reset后继续计入同一回合。运行异常、非有限状态和非法模型输出使实验失败，不计为策略失败回合。
 
@@ -79,11 +79,11 @@ L和physics_dt使用相同单位。两组动作先经过原生motor/thruster绑�
 
 零延迟、完整旧指令及恒定指令直接使用仓内原生步进函数，保留原有编译边界；只有控制内部需要切换的槽走混合路径。`--validate-native` 将这些端点和恒定指令与原生状态、观测、奖励及终止结果逐值比较。
 
-**分数槽混合是指令时间平均近似。** 它保留原生物理离散化，但不是在槽内部重新执行碰撞检测，也不声称得到精确中途切换的状态轨迹。宿主推理墙钟不会再推进模拟器，避免把注入延迟和本机计算时间重复相加。
+**分数槽混合使用指令时间平均近似。** 碰撞检测与状态求解保留在原生物理网格上，槽内动作切换通过混合指令表示。仿真按固定物理步推进，虚拟延迟决定新旧指令份额；宿主推理墙钟单独记录。
 
 ## 旧映射与硬件profile
 
-`--mapping coarse` 只把延迟按原生控制周期进行nearest-even取整，保持相同的零初始队列和物理参数；它用于映射敏感性对照，不是原上游RTC初始预取、RTC guidance或BID的完整复现。小于半个控制周期的延迟可能映射为0，requested/effective延迟分别记录。
+`--mapping coarse` 只把延迟按原生控制周期进行nearest-even取整，保持相同的零初始队列和物理参数；它用于对照延迟映射的敏感性，沿用本case的零初始队列和普通flow采样。小于半个控制周期的延迟可能映射为0，requested/effective延迟分别记录。
 
 当前不提供修改dt、frame_skip或碰撞系数的参数。此前参考实验将物理步长细分到约0.417 ms，虽然保留了控制周期，却改变了约束求解次数和部分任务动力学；此类研究应在独立分支开展。
 
@@ -96,7 +96,7 @@ flow_steps,latency_ms
 5,36.738
 ```
 
-以上仅展示文件格式，不能作为本机性能证据。调用时使用 `--flow-steps 1,3,5 --latency-profile profile.csv`，不再传 `--latencies-ms`。manifest保存文件哈希，并标记为外部profile场景；不会认证目标硬件、dtype或后端是否与本次JAX/float32 policy等价。参考仓库中的Torch/FP16、低精度算子profile不得直接解释为当前JAX路径的实测时延。
+以上为CSV格式示例，数值用于说明输入结构。调用时使用 `--flow-steps 1,3,5 --latency-profile profile.csv`，不再传 `--latencies-ms`。manifest保存文件哈希并标记为外部profile场景。使用者需核对硬件、dtype和后端；Torch/FP16或低精度profile用于声明的延迟场景，当前JAX/float32推理时延需独立测量。
 
 历史硬件数据见 [2026-08-11 延迟档案](../../../docs/kinetix-hardware-latencies.md) 和[完整精度 CSV](../../../docs/data/kinetix-hardware-latencies-20260811.csv)，保留 RTX 6000 Ada、RTX 3090、AGX Orin 15W／30W 四档、各 N=1～5。该批次使用同架构随机初始化权重、PyTorch eager FP16。用于本入口时，先筛选单个 `profile_id` 并导出 `flow_steps,latency_ms` 两列，再传给 `--latency-profile`；不要直接传入含四档硬件的完整档案。
 
@@ -122,7 +122,7 @@ flow_steps,latency_ms
 python benchmarks/dynamic/kinetix/summarize.py --input runs/dynamic/kinetix/matrix-001
 ```
 
-中断实验必须显式加 `--allow-partial`。请求中的host时间可能包含首次JIT编译，不能直接当作稳态推理时延；当前不自动输出真实硬件加速比。
+中断实验必须显式加 `--allow-partial`。请求中的host时间可能包含首次JIT编译等运行开销。稳态推理时延需预热后独立测量，再按同范围baseline计算硬件加速比。
 
 ## 源码与范围
 
@@ -130,16 +130,16 @@ python benchmarks/dynamic/kinetix/summarize.py --input runs/dynamic/kinetix/matr
 
 移植来源、原始文件hash和变更边界见 [PROVENANCE.json](../../../src/robotics_bench/kinetix/PROVENANCE.json)，许可见 [第三方说明](../../../THIRD_PARTY_NOTICES.md)。编辑器、PPO训练、云端下载和中间实验产物没有迁入。参考代码审查见 [latency–quality整理](../../../docs/kinetix-reference-review.md)。
 
-当前接入flow采样步数、虚拟延迟、原生噪声控制和配对评估。Torch等价policy、低精度内核、结构化student、RTC guidance/BID以及质量曲线拟合尚未接入执行入口。DOM继续独立规划。
+当前执行路径组合flow采样步数、虚拟延迟、原生噪声控制和配对评估；拟合与硬件映射分析见 [实验工作流](../../../docs/kinetix-latency-study.md)。DOM使用 [独立入口](../dynamicvla_dom/README.md)。
 
 ## 当前验证
 
-RTX 6000 Ada上完成 `car_launch` 与 `mjc_walker`、N∈{1,5}、L∈{0,21.938 ms}、seed0的8回合接入检查。car_launch四个单元均成功，控制步数分别41、43、44、46；mjc_walker分别为成功167步、失败、成功149步、成功207步。失败按256条预算进入总体统计。每单元仅一个回合，不能据此报告总体质量或最优flow步数。
+RTX 6000 Ada上完成 `car_launch` 与 `mjc_walker`、N∈{1,5}、L∈{0,21.938 ms}、seed0的8回合接入检查。car_launch四个单元均成功，控制步数分别41、43、44、46；mjc_walker分别为成功167步、失败、成功149步、成功207步。失败按256条预算进入总体统计。该接入检查每单元一个回合；更大规模质量矩阵见下文。
 
 两关分别完成zero-delay、full-old和constant-command的逐值原生对齐；四个配置的初始观测hash各自一致。八段视频均可解码，为126×126，帧数严格等于实际控制步数加1。wheel中的关卡、纹理、许可证和独立CPU统计已检查。
 
-另外完成原RTC BC权重的零延迟质量矩阵：12关、N=1..5、每格128个配对seed，共7680回合；平均成功率依次为78.45%、85.74%、89.32%、89.97%、88.87%。分析/绘图入口和区间见[迭代步数实验说明](../../../docs/kinetix-flow-quality.md)。独立`benchmark_eval.py`的动作预处理JIT已扩展到12关、N=5、4个seed：9关通过逐步检查并获得约1.12～1.25×稳态评估加速，3关未通过逐位检查；grasp_easy的原始GPU路径自身也观察到逐位不重复。全任务加速比不予认证，选项仍不进入默认runner。跨任务汇总与重复性诊断分别见`analyze_eval_benchmarks.py`和`diagnose_eval_preprocess.py`。更多seed/flow步数的优化覆盖、全12关的非零时延矩阵、目标硬件profile匹配和真正异步并发仍待验证。
+另外完成原RTC BC权重的零延迟质量矩阵：12关、N=1..5、每格128个配对seed，共7680回合；平均成功率依次为78.45%、85.74%、89.32%、89.97%、88.87%。分析/绘图入口和区间见[迭代步数实验说明](../../../docs/kinetix-flow-quality.md)。独立`benchmark_eval.py`的动作预处理JIT已扩展到12关、N=5、4个seed：9关通过逐步检查并获得约1.12～1.25×稳态评估加速，3关未通过逐位检查；grasp_easy的原始GPU路径自身也观察到逐位不重复。全任务加速比不予认证，选项仍不进入默认runner。跨任务汇总与重复性诊断分别见`analyze_eval_benchmarks.py`和`diagnose_eval_preprocess.py`。新的延迟与硬件映射实验按声明的任务、seed、flow步数和profile分别记录覆盖。
 
 ## English summary
 
-This case owns the RTC flow model, Kinetix runtime and Jax2D physics source. Supply only a trusted local checkpoint directory and a Python 3.11 JAX environment. Native-blend replays declared action availability on the unchanged native physics grid; it is a processed-command time-average approximation, not exact substep integration or hardware-in-the-loop execution. Flow-step and latency sweeps use paired seeds and per-cell failure-budget statistics. Optional videos retain every evaluated control frame. See the commands above; `--source` is intentionally absent.
+This case owns the RTC flow model, Kinetix runtime and Jax2D physics source. Supply only a trusted local checkpoint directory and a Python 3.11 JAX environment. Fine mode (native-blend) replays declared action availability on the native physics grid through processed-command time averaging; collision detection remains on that grid and injected latency uses a virtual clock. Flow-step and latency sweeps use paired seeds and per-cell failure-budget statistics. Optional videos retain every evaluated control frame. See the commands above; `--source` is intentionally absent.

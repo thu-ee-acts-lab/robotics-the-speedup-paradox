@@ -5,9 +5,9 @@ Cosmos层选择规则。当前是本仓BF16基线上的实现，不复用论文�
 π0.5的固定INT4/INT8使用独立scope，不套用含cross-attention的Cosmos分层规则。
 当前量化调优优先Cosmos；π0.5先采用text/LLM scope，暂缓diffusion/action expert。
 
-本轮固定INT8/INT4、渐进覆盖及共享VAE优化的实现阶段已完成；入口和验证范围汇总于
-[Cosmos量化指南](../cosmos-quantization.md)。本协议仍用于声明精度覆盖和评估口径，
-阶段完成不代表所有档位已经通过全量任务质量验收。
+通过 `--precision int8 --quant-scope dit --quant-tier N` 选择T0–T10档位，
+逐步将候选Linear从W8A8替换为W4A4。每档同时记录精度覆盖、完整推理时延和闭环质量。
+固定精度与共享VAE优化的运行配方见[Cosmos量化指南](../cosmos-quantization.md)。
 
 ## 固定的格式与候选集合
 
@@ -77,7 +77,7 @@ python benchmarks/inference/evaluate_cosmos.py --gpu 0 \
   --tiers 0 1 3 7 10 --output-dir runs/optimization/cosmos/pilot-tiers-001
 ```
 
-这是小样本pilot，不是全量任务集成功率。每档先warmup与计时，再重置相同初态，
+该pilot评估命令指定的任务与初态子集。每档先warmup与计时，再重置相同初态，
 统计从策略开始到成功或预算耗尽的控制步数。reset/settling和warmup不计入任务时长。
 每个档位的episode ledger独立保存，不能把不同档位的episode混成一个样本池。
 
