@@ -1,7 +1,6 @@
 # Robotics GPU operators
 
-本目录提供robotics独立维护的GPU算子，按融合、整数精度和硬件后端组织。
-CPU安装使用惰性导入；Torch、CUDA、Triton及编译扩展在对应GPU路径中加载。
+这里维护项目使用的 GPU 算子，包括整数矩阵乘、逐元素融合、卷积和 CUDA Graph 辅助工具。模型通过优化适配层调用它们；只运行 CPU 工具时不会加载 GPU 依赖。首次使用建议先看[推理实操](../../docs/hands-on.md#hardware)。
 
 源码按架构组织，架构目录内部再放对应的 CUDA/C++ 源码：
 
@@ -18,8 +17,7 @@ robotics_kernels/
   projections.py 兼容导入入口；实现位于common/
 ```
 
-Ampere和Ada共用同一个整数内核实现，显式tactic负责形状调优，不复制相同CUDA文件。
-当前性能/数值实测在SM89上；Ampere与Blackwell分别需要目标设备验证。
+Ampere 和 Ada 使用同一套整数实现，通过 tactic 选择分块配置。已有数值和性能测试使用 SM89；在 Ampere 或 Blackwell 上运行时，需要完成对应设备的检查。
 
 | 入口 | 格式与职责 | 验证边界 |
 | --- | --- | --- |
@@ -31,55 +29,34 @@ Ampere和Ada共用同一个整数内核实现，显式tactic负责形状调优�
 | `ampere_ada/convolution.py` | 仓内CUTLASS 2D/3D卷积，8个显式tactic，权重预打包、布局处理与bias epilogue | Ada实测；近似数值，不是无损替换；不支持的模块保持native并记录 |
 | `common/vae.py` | 保留原生通道归约，融合后续除法、scale、affine和可选SiLU | BF16逐值GPU检查及LIBERO/RoboCasa固定输入检查；不代表全任务集质量 |
 
-INT 的公开包装遵循 `from_linear → pack_input → forward_packed/forward` 生命周期。
-`forward_gelu` 将 GELU 或 gated GELU 与 activation pack 融合。激活按行、权重按输出
-通道使用动态/静态 float32 scale；INT4 字节的低 nibble 对应前一个元素。
-逻辑 K/N 与物理 padding 分开：K 补齐 128、N 补齐 8，补齐区域为数学零，输出再裁剪。
-这些对齐规则由kernel格式定义，逻辑维度由调用方传入。
+整数 Linear 的使用顺序是 `from_linear → pack_input → forward_packed/forward`：先准备权重，再打包输入，最后调用矩阵乘。`forward_gelu` 可以把 GELU 或 gated GELU 与输入打包合并。
 
-八个明确 tactic 的M/N/K、warp和流水级数位于 `ampere_ada/tactics.py`；0/1保留
-原始配置，2..7扩展窄N、大N、大K和流水深度候选。按真实 shape、设备和完整 Linear
-开销比较，不从旧 LLM 阈值继承最优值，也不将一张卡的配置自动套到另一张卡。
-`forward` 的计时须包含 activation prepare、pack 和必要的布局转换；离线权重打包单列。
+激活按行计算动态 float32 scale，权重按输出通道保存静态 scale。INT4 每字节的低 nibble 放前一个元素。计算时 K 补齐到 128、N 补齐到 8，补齐部分填零，返回前裁剪到原尺寸。
 
-`integer_qkv` 与 `integer_gate_up` 分别合并同输入、同格式的投影；`integer_grouped`
-兼容同时开启两者。权重/scale在初始化时拼接，运行时共享GEMM结果。
-`integer_group_views` 允许消费者直接读取输出切片，省去显式的连续化拷贝；对应激活
-准备支持末维连续、行间有stride的输入。任意不规则布局会明确拒绝，不默默复制。
-`integer_pack_reuse` 让INT4量化与nibble打包复用同一行数据。所有开关独立保留；
-选定kernel后，在完整policy入口复核收益。
+在 `ampere_ada/tactics.py` 选择 8 个 tactic：0/1 是原配置，2..7 提供窄 N、大 N、大 K 和不同流水深度。使用实际输入形状在目标 GPU 上比较。完整 Linear 计时包括激活准备、打包和布局转换，离线权重打包单独计时。
 
-`ampere_ada/modulation.py` 提供Cosmos的modulation与激活量化融合，保留原BF16
-中间舍入；内部packed carrier同时支持按需提供INT4/INT8，避免混合档位误用格式。
-模型外接口仍交付CPU动作，不向模拟器暴露packed数据。
-`norm_modulation_quant` 将LayerNorm也并入打包，`residual_norm_modulation_quant`
-进一步并入前置门控残差；新的FP32归约顺序可改变动作，二者是独立的数值实验开关，
-不属于保留原生归约的配方。它们与原调制打包共用当前文件中的格式和舍入边界。
-`integer_biasless` 为无bias层提供独立尾部处理实验路径；有bias时继续正常计算bias。
+用 `integer_qkv` 或 `integer_gate_up` 合并同输入、同格式的投影；`integer_grouped` 同时开启两者。权重和 scale 在初始化时拼接，运行时共用一次 GEMM。
 
-量化实验使用Cosmos的DiT scope和π0.5的text/LLM scope。
-各scope的后端命中、动作偏差和任务质量分别记录。
+`integer_group_views` 让后续算子直接使用输出切片，支持末维连续、行间带 stride 的输入，其他布局会报错。`integer_pack_reuse` 在 INT4 量化和 nibble 打包之间复用行数据。逐项测试这些开关后，再比较完整 policy 的耗时。
 
-Cosmos固定/渐进整数精度、共享VAE优化的启动配方、测量口径、
-独立实验开关与回退方式见 [Cosmos量化指南](../../docs/cosmos-quantization.md)。
+Cosmos 的调制和量化融合位于 `ampere_ada/modulation.py`。它保留 BF16 中间舍入，按后续投影需要提供 INT4 或 INT8 数据，engine 对外仍返回 CPU 动作。
 
-卷积的CUTLASS迭代器、分块、流水线与数值边界见
-[CONVOLUTION.md](ampere_ada/CONVOLUTION.md)。单算子调优收益必须回到完整policy复核；
-当前卷积与attention替换均保留独立实验开关，不自动替换默认后端。
+`norm_modulation_quant` 进一步融合 LayerNorm，`residual_norm_modulation_quant` 再融合前置门控残差。它们会改变 FP32 归约顺序，需要检查动作误差。`integer_biasless` 则针对无 bias 的 Linear；有 bias 的层仍按正常路径计算。
 
-INT后端使用架构目录内的CUTLASS头文件副本，固定revision为
-`982748aa7356fa838c2ea4994ddcb0b2a4b4cefa`，来源及逐文件哈希见
-`ampere_ada/third_party/cutlass/PROVENANCE.json`。构建不读取
-`ROBOTICS_CUTLASS_ROOT`，也不查找外部VLM、QuaRot或Mini QServe项目。
-本机仍需提供CUDA开发工具链：
+模型实验使用 Cosmos DiT 与π0.5 text/LLM scope，记录后端、动作偏差和任务质量；配方与回退见[Cosmos指南](../../docs/cosmos-quantization.md)。
+
+卷积 tactic 与数值说明见[CONVOLUTION.md](ampere_ada/CONVOLUTION.md)。卷积及 attention 替换均通过独立开关启用。
+
+模型侧的调用代码在 `robotics_bench/optimizations/`。修改算子后，依次检查算子数值、完整 policy 的动作与耗时、闭环任务结果。
+
+INT 后端固定 CUTLASS revision `982748aa7356fa838c2ea4994ddcb0b2a4b4cefa`，头文件、许可证和逐文件 hash 位于 `ampere_ada/third_party/cutlass/`。构建使用仓内头文件及本机 CUDA 工具链：
 
 ```bash
 export CUDA_HOME=/path/to/cuda
 export TORCH_CUDA_ARCH_LIST=8.9
 ```
 
-扩展按Torch的CUDA extension缓存规则生成编译产物；源码与头文件均来自本仓。
-临时 workspace 由 Torch 管理，CUDA 调用使用输入设备的当前 stream。
+编译结果保存到 Torch 的 CUDA extension 缓存。Torch 管理临时 workspace；CUDA 调用使用输入所在设备的当前 stream。
 
 Blackwell 构建入口：
 
@@ -88,9 +65,7 @@ python tools/build_blackwell.py --backend fp8 \
   --cutlass-root /path/to/compatible-cutlass --arch 11.0a
 ```
 
-`--arch` 必须与目标 GPU、CUDA 和 CUTLASS 版本匹配。FP4/NVFP4/MXFP4、tensor FP8/MXFP8
-与 INT4/INT8 的编码和 scale 布局不同，不能共用 packed buffer。
-FP 后端的来源与修改边界见 `blackwell/PROVENANCE.json` 和许可证。
+`--arch` 匹配目标 GPU、CUDA 和 CUTLASS。FP4/NVFP4/MXFP4、tensor FP8/MXFP8 与 INT4/INT8 分别使用各自编码、scale 和 packed buffer；FP 来源和条款见 `blackwell/PROVENANCE.json` 与许可证。
 
 GPU 测试在模型环境中显式启用，公共 CPU CI 默认跳过：
 
@@ -98,6 +73,4 @@ GPU 测试在模型环境中显式启用，公共 CPU CI 默认跳过：
 ROBOTICS_GPU_TESTS=1 CUDA_VISIBLE_DEVICES=0 python -m pytest -q tests/gpu
 ```
 
-模型接入位于 `robotics_bench/optimizations/`；完整调用计时和可视化入口见
-[推理实验说明](../../benchmarks/inference/README.md)。依次检查算子数值、完整policy
-动作偏差和闭环任务结果。
+完整调用计时和可视化见[推理实验说明](../../benchmarks/inference/README.md)。

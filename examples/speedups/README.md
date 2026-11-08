@@ -7,13 +7,13 @@ python tools/compare_speedups.py --input examples/speedups/synthetic.json
 python tools/compare_speedups.py --input examples/speedups/synthetic.json --markdown
 ```
 
-默认 stdout 为 JSON，`--json` 可显式指定。错误写 stderr，退出码为 2；成功为 0。本文件与样例用于解释计算，所有样例数字均为 synthetic，不代表论文实验结果。工具独立于 manifest/trace v1，不改变现有 schema 或 validator，也不运行模拟器。
+默认stdout输出JSON，可显式加 `--json`；`--markdown` 输出表格。成功退出0，错误写stderr并退出2。样例均为synthetic，工具独立于manifest/trace v1。
 
 ## 一份输入代表一个可比较案例
 
-提交一份 case 即表示输入作者声明：所有行采用同场景、同硬件、同控制设置和同统计范围。工具只能验证字段与计算，不能验证这一声明、数据真实性或两行是否使用同一批成功 seeds。`case_id` 应能定位共同实验条件；`timing_scope` 与 `clock_domain` 明确时间范围及时间域。不要把不同设备或不同范围的行混入一个 case。
+每份case由输入作者声明同场景、硬件、控制设置和统计范围，工具校验字段并计算。用 `case_id` 关联实验条件，`timing_scope` 和 `clock_domain` 指定计时范围/时间域；样本与成功seed一致性在原始记录中核对。
 
-`inference_time_ms` 是完整待比较推理范围的固定或代表性延迟标量，不是 microkernel speedup。若提供均值且延迟抖动跨越 overlap 阈值，`min(mean(I), L)` 不等于 `mean(min(I, L))`，计算结果仍只是该标量模型估计，不能称为实测平均 cycle。
+`inference_time_ms` 为完整推理范围的代表性时延标量。抖动跨越overlap阈值时，`min(mean(I), L)` 与 `mean(min(I, L))` 可不同，输出按标量周期估计报告。
 
 | 字段 | 约束 |
 | --- | --- |
@@ -45,9 +45,9 @@ speedup_task_success   = T0_success / Ti_success
 latency_ratio_alpha   = Ii / I0
 ```
 
-`estimate_model=paper_steady_state` 表示规则、稳态、等长动作块的标量模型。组合周期是对串行/重叠周期表达式的工程推广；本工具不声称它是论文直接给出的组合公式。它没有模拟首尾 pipeline、提前 terminal、有限 episode 或调度 jitter。
+`estimate_model=paper_steady_state` 使用规则、稳态、等长动作块。组合周期是串行/重叠公式的工程推广；首尾pipeline、提前终止、有限回合与调度抖动需由实际trace分析。
 
-输出中的 `paper_steady_state` 保存周期、隐藏/剩余推理时间和 N×C 任务估计；`provided_summary` 保留输入作者提供的成功均值。后两种 task 指标不可混同：一个由 chunk 数和周期估计，另一个是提供的成功条件任务时间均值之比，不是逐 seed 加速比的平均，更不是包含失败的任务效率。
+`paper_steady_state` 保存周期、隐藏/剩余推理时间及N×C估计；`provided_summary` 保存提供的成功均值。两种task指标分别是chunk模型估计与成功任务时间的均值之比；逐seed比值平均、含失败效率另行定义。
 
 任一侧没有成功样本或缺少所需均值，对应 task ratio 为 null，并在 `missing_reasons` 写明原因。不从缺失任务时间反推数据。SR 和相对 baseline 的百分点变化始终并报；即使两行 SR 相同，成功子集仍可能不同。
 
@@ -64,4 +64,4 @@ latency_ratio_alpha   = Ii / I0
 
 也不能一般性地相乘独立优化收益：若把量化推理时间改为 60 ms，独立周期加速比的乘积为 `(300/260)*(300/240)≈1.442308`，组合周期却仍为 200 ms，对应 1.5 倍。
 
-验证命令：`python -m pytest -q tests/test_speedups.py`。测试使用独立手算、输入负例和 CLI smoke，不以该工具验证真实性能。
+验证命令：`python -m pytest -q tests/test_speedups.py`，覆盖独立手算、输入负例和CLI。

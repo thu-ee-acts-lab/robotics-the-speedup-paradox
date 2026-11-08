@@ -1,14 +1,14 @@
 # AI 协作约定
 
-本仓库提供协作协议、数据schema、CPU契约/分析工具，以及基于外部兼容源码的π0.5＋LIBERO和Cosmos＋LIBERO入口。Cosmos引擎、原生模拟器适配与单环境runner位于 `src/robotics_bench/`。静态异步采用论文抽象 `paper_async`；已迁入PI0.5的PaliGemma/Gemma/SigLIP执行代码、Cosmos的policy/sampler/DiT热路径，以及独立BF16融合和INT4/INT8算子；Blackwell FP4/FP8源码保留但尚待目标硬件验证。通用框架、Cosmos VAE/attention依赖和模拟器仍为外部依赖。不要把模板、schema校验、synthetic轨迹或单次smoke说成完整性能/任务集结果。
+模型、runner和适配器位于 `src/robotics_bench/`，算子位于 `src/robotics_kernels/`。仓内维护π0.5、Cosmos、DynamicVLA热路径及KINETIX模型/物理；框架、部分模拟器和模型资产按case配置。静态异步使用 `paper_async`。报告验证范围时区分契约、合成样例、单回合和任务集；Blackwell FP4/FP8源码需目标硬件验证。
 
-Cosmos＋RoboCasa已提供单环境入口，当前验证限于TurnOffMicrowave固定场景的sync/paper_async GPU smoke。RoboCasa采用三相机、H=32、独立robosuite1.5.1环境，reset后才读取本回合指令；不要复用LIBERO的H=16或预先固定语言。`--reference-run` 校验相同场景初始化，训练数据与厨房资产分别准备。
+Cosmos＋RoboCasa使用三相机、H=32及独立robosuite1.5.1环境，reset后读取本回合语言；LIBERO使用H=16。`--reference-run` 核对初态，训练数据与厨房资产分别准备。TurnOffMicrowave的sync/paper_async接入记录见case指南。
 
-`tools/prepare_resources.py` 提供独立的可选联网下载/本地复用入口，默认模型和数据集缓存位于 `~/.cache/robotics/hub`，LIBERO资产沿用 `~/.cache/libero/assets`。下载不进入公共CPU CI，运行入口继续离线；资源准备成功不等于新机运行环境已经安装。
+`tools/prepare_resources.py` 下载或复用资源：模型/数据默认 `~/.cache/robotics/hub`，LIBERO资产为 `~/.cache/libero/assets`。环境安装独立完成；评估离线运行，公共CPU CI不下载模型。
 
 ## 开始工作
 
-本仓执行 [贡献与PR制度](CONTRIBUTING.md)：代码、配置和文档都在主题分支开发，通过PR进入main，不直接提交/推送main。依赖未合并功能时明确声明前置分支/PR，并使用对应base；不将已有功能混入文档PR。提交与PR标题采用 `type: 中文摘要 / English summary`，PR正文按模板写双语目的、范围、验证、影响与回退，小改动保持简短。维护者审核后默认以merge commit合并。用户明确授权合并某个PR时，在规则满足后继续执行，不重复询问同一授权；普通开发不自动合并。
+遵循 [贡献与PR制度](CONTRIBUTING.md)：主题分支开发，PR进入main，禁止直接提交/推送main。依赖未合并功能时使用前置分支为base并注明PR。标题采用 `type: 中文摘要 / English summary`，正文保留模板的双语四节，范围与实际diff一致。审核后默认merge commit；普通开发不自动合并。用户已明确授权某PR合并且规则满足时继续执行，不重复询问。
 
 1. 阅读 `README.md`、`CONTRIBUTING.md`、当前 Issue/PR 的任务范围及相关 `docs/protocols/` 文档。
 2. 确认 `git status --short`、分支和基线 commit，保留其他人的修改。任务范围以 Issue/PR 和用户最新指令为准。
@@ -17,7 +17,7 @@ Cosmos＋RoboCasa已提供单环境入口，当前验证限于TurnOffMicrowave�
 
 ## 轻量化方法参考
 
-后续模型轻量化与推理基础设施工作优先参考外部skill `$edge-model-lightweight`，来源为 [edge-model-lightweight-skill](https://github.com/Ther-nullptr/edge-model-lightweight-skill)。按任务阅读其完整计时、profile、收益估算、算子/精度与流式质量指南；仓内 [edge-inference-optimization](.agents/skills/edge-inference-optimization/SKILL.md) 补充机器人case的具体约束。外部skill按访问权限独立安装，不是运行本仓CPU工具或CI的依赖。
+优化工作优先参考外部 `$edge-model-lightweight`（[来源](https://github.com/Ther-nullptr/edge-model-lightweight-skill)），按需阅读计时、profile、算子/精度和质量评估部分。仓内 [edge-inference-optimization](.agents/skills/edge-inference-optimization/SKILL.md) 补充case约束。外部skill独立安装，CPU工具和CI保持自包含。
 
 - 保留静态/动态case绑定、Kinetix原生JAX路径和各自控制协议；方法参考不要求统一模型输入、动作空间或执行器。
 - 原始实现、优化全精度和轻量化实现可分别比较；量化专项增量收益与主表相对固定case baseline的总收益分别命名，遵循 [加速比协议](docs/protocols/speedup-metrics.md)。
@@ -46,9 +46,9 @@ python -m pytest -q
 python -m compileall -q tools benchmarks src
 ```
 
-开发依赖安装命令见 `CONTRIBUTING.md`。`compileall` 是语法检查，不是 formatter。报告实际运行的命令、结果及未验证条件；schema 校验通过不能证明实时性、数值精度或任务成功率。
+依赖见 `CONTRIBUTING.md`。Ruff负责格式，`compileall`负责语法。按实际命令报告结果；实时性、数值与任务质量分别提供对应证据。
 
-完成或暂停时检查 diff，将需要共享的事实、证据和后续动作写入 Issue/PR 的交接摘要。个人过程记录可放 `.local/`、`docs/handoffs/` 或工作区研究目录，这些不进入 Git；不要求每次对话新增文档。代码、稳定协议、工具说明和可复现小样例随版本管理，研究综述、阶段记录和生成图表留本地。已提交文档不得链接被忽略的本地文件。合并和发布由维护者负责。
+交接时检查diff，在Issue/PR记录事实、证据和下一步。代码、稳定协议、使用说明和小样例进入Git；过程记录、综述和生成图表放 `.local/`、`docs/handoffs/` 或研究目录。公共文档链接须可共享；合并与发布由维护者负责。
 
 ## 算子优化与可视化
 
@@ -58,13 +58,7 @@ python -m compileall -q tools benchmarks src
 
 INT实现参照本仓独立FP副本的loader/Linear/pack/prepare/forward_packed分层；不导入父目录VLM代码。格式、scale、zero-point、pack版本和实际硬件后端显式区分，不能把INT4称为FP4。
 
-Cosmos固定INT8/INT4、渐进覆盖与共享VAE优化已完成本轮实现和性能验证，稳定说明见
-[Cosmos量化指南](docs/cosmos-quantization.md)；全量量化任务质量仍待验证。后续新调优
-按新的任务范围执行，不因已有开关默认继续压测。π0.5先处理text/LLM，diffusion/action
-expert暂缓。INT源码、
-CUDA实现和固定CUTLASS头文件均由robotics包内维护，不从外部VLM、QuaRot或Mini QServe
-目录加载。INT4允许较大动作偏差继续性能实验，仍需记录偏差、实际覆盖及任务结果；
-零成功时不生成成功条件任务加速比。每轮优先固定INT4/INT8完整调用，再开展渐进覆盖。
+Cosmos固定/渐进整数与共享VAE配方见 [量化指南](docs/cosmos-quantization.md)。新调优按明确任务执行，不自动追加压测；全量任务质量另行验收。π0.5优先text/LLM，diffusion/action expert暂缓。INT/CUDA及固定CUTLASS头文件从robotics包加载，不使用外部VLM、QuaRot或Mini QServe目录。先测固定INT4/INT8完整调用，再扩展渐进覆盖；INT4可保留较大动作偏差继续测量，须记录偏差、覆盖与任务结果，零成功时不计算成功条件任务加速比。
 
 ## LingBot＋RoboTwin
 

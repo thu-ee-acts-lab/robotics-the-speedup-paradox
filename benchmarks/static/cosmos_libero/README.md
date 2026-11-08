@@ -1,14 +1,12 @@
 # Cosmos-Policy＋LIBERO 静态 case
 
-[run.sh](run.sh) 调用本仓库的 [run.py](run.py)，每次只推进一个原生 LIBERO 环境。模型加载与动作推理由 [CosmosEngine](../../../src/robotics_bench/engines/cosmos.py) 负责，[LIBERO adapter](../../../src/robotics_bench/simulators/libero.py) 负责任务、初态和环境生命周期，[静态 runner](../../../src/robotics_bench/protocols/static_runner.py) 负责动作执行与历史观测选择。外部源码由调用者提供，模型和模拟器资产可复用本地文件，或通过独立的 [资源准备工具](../../../tools/RESOURCE_PREPARATION.md) 下载；这些资源不进入 Git。
+[环境配置](../../../docs/environment_setup.md) · [量化与异步实操](../../../docs/hands-on.md#static)
 
-默认采用 BF16；`--precision int8|int4 --quant-scope dit` 启用仓内整数推理。旧协议参数 `--quant` 保持 `none`，实际模型精度由 `--precision` 选择。模型固定预测 H=16 个七维动作，`--n-action-steps` 指每块实际执行的前 n 个动作，默认 n=16，范围为 1..16。遇到成功、环境终止或步数预算时立即停止。
+这个入口在单个 LIBERO 环境中运行 Cosmos Policy。你可以通过 [run.sh](run.sh) / [run.py](run.py) 选择同步、历史观测异步和模型精度；内部由 [CosmosEngine](../../../src/robotics_bench/engines/cosmos.py) 推理、[LIBERO adapter](../../../src/robotics_bench/simulators/libero.py) 管理环境、[静态 runner](../../../src/robotics_bench/protocols/static_runner.py) 执行动作。默认使用 BF16，预测 H=16 个七维动作，每次执行前 n 个（默认16，范围1..16），直到成功、环境终止或预算耗尽。
 
 ## 配置路径与运行环境
 
-通用安装层次、已验证依赖组合和故障排查见 [环境指南](../../../docs/environment_setup.md)。
-
-从仓库根目录复制 [路径模板](paths.env.example)，填入已有资源后显式加载：
+填写 [路径模板](paths.env.example)，显式加载已安装环境与资源：
 
 ```bash
 mkdir -p .local
@@ -27,15 +25,15 @@ source .local/cosmos-libero.env
 | `ROBOTICS_COSMOS_VAE_CHECKPOINT` | `--vae-checkpoint`，配套视频 tokenizer 的 `tokenizer.pth` |
 | `ROBOTICS_COSMOS_LIBERO_CONFIG_DIR` | `--libero-config-dir`，包含 `config.yaml` 的目录 |
 
-CLI 路径优先于环境变量；shell 入口不会自动加载 `.env` 文件。也可使用选定的解释器直接运行 `python benchmarks/static/cosmos_libero/run.py`。`config.yaml` 中的 BDDL、初态、资产等路径须指向已准备好的 LIBERO 资源；运行入口设置 `LIBERO_CONFIG_PATH`。
+命令行路径会覆盖环境变量，`run.sh` 使用指定解释器；也可以直接运行 `run.py`。检查 `config.yaml` 中的 BDDL、初态和资产路径是否正确，入口会设置 `LIBERO_CONFIG_PATH`。
 
-CPU 开发依赖足以运行配置和接口测试。实际模型运行还需要兼容的 PyTorch/CUDA、Cosmos 依赖、LIBERO、MuJoCo/robosuite 及 EGL；启用录像需要 imageio 和 MP4/FFmpeg 后端。本机测试使用普通用户的Python 3.10.12环境，复用既有Cosmos packages，并单独安装robosuite 1.4.0；实际组合为PyTorch 2.7.0+cu128、MuJoCo 3.2.6、LIBERO 0.1.1。RoboCasa使用的robosuite 1.5.x不满足本LIBERO包的SingleArmEnv接口。在新机器上按环境指南安装依赖，并完成资源预检与单回合闭环检查。
+已有实验使用 Python 3.10.12、PyTorch 2.7.0+cu128、MuJoCo 3.2.6、LIBERO 0.1.1 和 robosuite 1.4.0。请与 RoboCasa 的1.5.x环境分开安装。GPU 运行还需要 Cosmos 依赖和 EGL，录像需要 imageio/FFmpeg。安装步骤与检查命令见 [环境指南](../../../docs/environment_setup.md)。
 
-实验入口保持离线，缺少文件时先运行 `python tools/prepare_resources.py --case cosmos_libero`。模型默认下载到 `~/.cache/robotics/hub/`，LIBERO资产到 `~/.cache/libero/assets/`，再显式加载生成的 `~/.cache/robotics/env/cosmos_libero.env`。生成完整源码、解释器和初态配置的方法见 [资源准备说明](../../../tools/RESOURCE_PREPARATION.md)。原生配置中的已知 Video2World 基础 checkpoint 引用在加载期间绑定到本次 Policy checkpoint，并核对最终加载路径；不再依赖源码目录中那份未参与推理的基础权重。
+缺少资源时运行 `python tools/prepare_resources.py --case cosmos_libero`，再加载生成的 `~/.cache/robotics/env/cosmos_libero.env`。默认模型在 `~/.cache/robotics/hub/`、资产在 `~/.cache/libero/assets/`，复用方式见 [资源说明](../../../tools/RESOURCE_PREPARATION.md)。加载器将已知Video2World基础引用绑定到显式Policy checkpoint，并核对最终路径。
 
 ## 预检与小规模运行
 
-先运行标准库预检，无需选择 GPU：
+先运行 CPU 预检，检查文件、统计量和 `get_action` 接口。这个步骤会读取文件计算 SHA-256，但不会加载 checkpoint 张量、使用 GPU 或启动模拟器：
 
 ```bash
 bash benchmarks/static/cosmos_libero/run.sh \
@@ -44,9 +42,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --output-dir runs/static/cosmos_libero/sync-001 --dry-run
 ```
 
-`--dry-run` 校验参数、所需文件、统计量维度和有限数值，并用 AST 检查外部 `get_action` 调用签名。它读取文件计算 SHA-256，不反序列化 checkpoint/T5，不导入模型、Torch 或模拟器，不创建输出目录。大型 checkpoint 的哈希仍需要文件读取时间。随后用固定输入检查动作数值，并用单回合验证模型与模拟器。
-
-实际运行必须显式指定一个 GPU 索引或完整 GPU UUID。以下用 GPU 0 示意，执行前替换为可用设备；每次使用新输出目录。
+真实运行指定空闲GPU索引或完整UUID，并使用新输出目录：
 
 ```bash
 # 同步单 episode，保存完整执行视频
@@ -62,13 +58,13 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --gpu 0 --output-dir runs/static/cosmos_libero/paper-async-001
 ```
 
-程序同时将 Python 控制台输出写入 `<output-dir>/run.log`，无需手动 `tee`。已有输出目录会被拒绝。`COSMOS_SMOKE` 须关闭；外部该开关可能跳过 checkpoint 加载，因此即使将本次运行标记为 `--run-kind smoke`，也不能启用它。
+控制台输出会自动保存到 `run.log`。运行前关闭环境变量 `COSMOS_SMOKE`，让模型正常加载 checkpoint；命令行的 `--run-kind smoke` 只是运行标签，不会跳过加载。
 
 ## 任务选择与总预算
 
-`--episodes` 是整个运行的总 episode 预算，默认 1。`--task-ids` 默认为 `all`，也接受 `0,2,9` 等不重复的逗号列表；四个可选 suite 的任务 ID 为 0..9。入口在选定任务间分配总预算，每个任务从初态 0 开始，不重复使用初态；预算超过选定任务的可用初态总数会失败。默认 `all` 配合少量 episode 不保证覆盖全部任务。
+`--episodes` 设置本次运行的总回合数，默认1。`--task-ids` 可使用 `all`，或 `0,2,9` 这样的逗号列表；四个 suite 的任务 ID 都是0..9。程序在所选任务间分配回合，从初态0开始且不重复使用，超过可用初态总数时会报错。运行后在 `coverage.json` 中查看实际跑过的任务和初态。
 
-当前 LIBERO-object 资源为 10 个任务、每任务 50 个初态。完整覆盖应显式选择全部任务和总预算 500：
+LIBERO-object含10任务×50初态，完整500回合命令如下；与异步比较时固定资源、任务/初态、seed、n和采样步数：
 
 ```bash
 bash benchmarks/static/cosmos_libero/run.sh \
@@ -76,8 +72,6 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --schedule sync --quant none \
   --gpu 0 --output-dir runs/static/cosmos_libero/object-all-sync-001
 ```
-
-这条命令表达完整评估范围，当前文档不声明该评估已完成。与同步比较论文异步时，保持相同资源、任务/初态、seed、n、去噪步数和预算，仅调整调度及 n′。
 
 | 参数 | 默认值 / 约束 |
 | --- | --- |
@@ -92,25 +86,23 @@ bash benchmarks/static/cosmos_libero/run.sh \
 | `--quant` | 仅 `none`，未接入的量化选项会被拒绝 |
 | `--run-kind` | 默认单 episode 为 `smoke`，多 episode 为 `evaluation`；标签不证明验证范围 |
 
-每个 episode 先显式 reset，再应用指定初态并进行 10 步 settling；settling 不计入 rollout 控制步数预算。环境不会在终止后自动开始另一个 episode。
+每个回合先 reset、设置指定初态，再执行10步 settling，随后开始策略控制计数。回合终止后，环境等待下一次显式 reset。
 
 ## 论文异步与计时
 
-`sync` 在需要生成动作块时使用当前观测。`paper_async` 在控制步 t 回取 t−n′ 的历史观测，主相机、腕相机和 proprio 来自同一份快照；历史不足时使用当前观测。历史按原始控制步保存，每次 episode reset 清空。省略 `--schedule` 时，正的 `--overlap-actions` 自动选择 `paper_async`；显式 `sync` 与正 n′ 冲突会失败。
+`sync` 在需要新动作块时读取当前观测。`paper_async` 在控制步 t 读取 t−n′ 的主相机、腕相机和 proprio 快照，历史不足时使用当前观测，每个回合重新建立历史。省略 `--schedule` 时，正 n′ 会自动选择异步；显式同步与正 n′ 一起使用会报错。
 
-runner串行推进环境，通过历史快照评估观测延迟对动作质量的影响。`requests.jsonl` 记录调用的 `control_step`、`observation_step`、`history_offset_steps` 和 `inference_index`，可核对实际采用的观测。
-
-论文周期复用 [paper_async.py](../pi05_libero/paper_async.py) 的合同：
+推理和环境按顺序执行。运行后可在 `requests.jsonl` 中检查 `control_step`、`observation_step`、`history_offset_steps` 和 `inference_index`，确认每次推理实际用了哪一步观测。[paper_async.py](../pi05_libero/paper_async.py) 按下式估算动作块周期：
 
 $$
 C(n')=T_{\mathrm{inf}}+nT_{\mathrm{act}}-\min(T_{\mathrm{inf}},n'T_{\mathrm{act}}).
 $$
 
-`--paper-action-time-ms` 默认 50 ms，仅用于 `paper_model` 估算，不修改模拟器控制或 physics dt。需要周期估算时，同时传 `--paper-inference-time-ms` 和非空 `--paper-inference-time-source`，声明同配置 profile 的时延与来源；入口不验证来源文件。缺少推理时延时，周期保持 `null`、状态为 `requires_inference_profile`。`eval_s` 单列串行评估墙钟时间；控制步数、推理时延与论文周期分别记录。
+`--paper-action-time-ms` 默认50 ms，用于 `paper_model` 估算，模拟器物理步长保持原样。要计算周期，需要提供 `--paper-inference-time-ms` 和非空的 `--paper-inference-time-source`；入口保存来源说明，不读取来源文件。没有 Tinf 时，周期为 null，状态为 `requires_inference_profile`。实际评估墙钟时间另存为 `eval_s`。
 
 ## 视频与自动产物
 
-默认关闭视频。`--record-video` 录制本次实际评估的全部 episode；`--video-episodes-per-task N` 只录每任务前 N 条；`--no-record-video` 显式关闭，三者互斥。视频包含 settling 后的初始画面和成功、失败或超时的终止画面。`--video-fps` 默认 30，只影响播放帧率；录制/编码会增加墙钟开销，写入失败会使运行报错。
+视频默认关闭。`--record-video` 录制全部回合，`--video-episodes-per-task N` 录每个任务前 N 回合，`--no-record-video` 关闭录制，三者只能选一个。视频从 settling 后的初始画面录到终止画面；`--video-fps` 默认30，只控制播放速度。编码会增加墙钟耗时，写入失败时程序报错。
 
 | 输出 | 内容 |
 | --- | --- |
@@ -126,36 +118,20 @@ $$
 | `videos/<task>/*.mp4` | 启用录制时的完整 episode 视频 |
 | `failure.json` | 实际执行异常及 traceback；失败发生前尚未生成的产物可能缺失 |
 
-可用 `python tools/summarize_experiment.py --input runs/static/cosmos_libero/sync-video-001 --per-task` 在 CPU 上重新汇总。未完成的运行须显式加 `--allow-partial`；汇总不会将失败或不完整运行改成已完成。
-
-manifest 使用独立 `cosmos-libero-run-v1` 格式，`requests.jsonl` 是本 case 的请求记录，不是通用逐 action trace。实验输出和本机配置留在 Git 忽略的本地目录。
+运行结束后，先查看 `episode-summary.md` 和 `coverage.json`。也可以用 `python tools/summarize_experiment.py --input runs/static/cosmos_libero/sync-video-001 --per-task` 重新统计；分析未完成的运行时需加 `--allow-partial`。本入口使用 `cosmos-libero-run-v1` manifest 和独立的请求记录，实验结果与本机配置留在 Git 之外。
 
 ## 验证与版本边界
 
-已完成586项CPU测试及RTX 6000 Ada上的以下GPU检查：固定 `sample_libero_10_observation.pkl`、seed195时，新引擎与原生动作接口输出完全相等（16×7、float64、最大绝对误差0）；LIBERO-object任务0、初态0、环境seed0、H=n=16、5步采样下，同步episode在137个控制步成功，`paper_async n′=2` 在154步成功。两次加载与覆盖审计通过；异步请求记录确认首轮使用当前观测，后续回看2个原始控制步；录像为256×256、30 FPS、155帧，含初始和终止画面。
+已有586项 CPU 检查，以及 RTX 6000 Ada 上的固定输入和单回合验证。固定 `sample_libero_10_observation.pkl`、seed195 时，动作与原生接口逐值相同，形状为16×7、dtype为float64、最大绝对误差为0。在 object 任务0、初态0、环境 seed0、H=n=16、5步采样下，同步在137步成功，n′=2异步在154步成功。加载与覆盖检查通过；异步首轮用当前观测，此后回看2步。对应录像为256×256、30 FPS、155帧。
 
-以上记录覆盖固定输入对齐和指定初态的单episode闭环。DiT INT8/INT4完整调用计时与profile见 [Cosmos量化指南](../../../docs/cosmos-quantization.md)；任务级比较需绑定相同配置的闭环质量与请求计数。RoboCasa使用 [独立case记录](../cosmos_robocasa/README.md)。
+这些记录覆盖固定输入和指定初态闭环；完整推理计时见 [量化指南](../../../docs/cosmos-quantization.md)，RoboCasa见 [对应case](../cosmos_robocasa/README.md)。每次case指纹绑定资源、执行代码与选项：源码有Git信息时记录commit/dirty，否则保存Python源码树SHA-256和 `git_available=false`。
 
-默认执行本仓维护的 policy、sampler 和 DiT，加载框架及 VAE/attention 依赖仍来自调用者指定的兼容外部源码。外部源码有Git信息时记录commit/dirty身份；已验证副本缺少 `.git`，使用Python源码树SHA-256与 `git_available=false` 标识。资源文件、本仓执行代码和选项共同进入 case 指纹。
-
-来源与条款边界见 [第三方记录](../../../THIRD_PARTY_NOTICES.md)；模型、任务、调度和时间口径分别遵循 [模型接入](../../../docs/protocols/model-adapters.md)、[仿真协议](../../../docs/protocols/simulation.md) 与 [加速比协议](../../../docs/protocols/speedup-metrics.md)。
+来源与许可见 [第三方说明](../../../THIRD_PARTY_NOTICES.md)，接口、仿真与计时分别遵循 [模型接入](../../../docs/protocols/model-adapters.md)、[仿真协议](../../../docs/protocols/simulation.md) 和 [加速比定义](../../../docs/protocols/speedup-metrics.md)。
 
 ## 本仓执行代码与优化
 
-默认 `--model-runtime owned` 在加载并审计 checkpoint 后，绑定本仓的 Cosmos policy、
-sampler 和 DiT 执行代码；通用框架、VAE 和 attention 库仍为外部依赖。
-`--model-runtime native` 保留原始参考路径。
+`--model-runtime owned` 加载并审计权重后使用仓内policy/sampler/DiT；loader、VAE和attention库来自兼容依赖。`native` 选择原始参考路径。
 
-优化默认关闭，可独立使用 `--enable modulation`、`--enable gated_residual` 和
-`--enable cuda_graph`。低精度用 `--precision int8 --quant-scope dit`，并可选
-`shared_quant`、`activation_quant_fusion`；INT4 属于单独的有损实验配置。
-`--enable modulation_quant` 在整数精度和 `modulation` 开启时，将调制与激活量化
-融合，保留原生LayerNorm。该开关默认关闭，需对照同精度完整推理时延。
-`--precision int8 --quant-scope dit --quant-tier N` 可选择渐进INT4覆盖；档位定义、
-完整推理扫描与同初态闭环入口见 [渐进量化协议](../../../docs/protocols/progressive-quantization.md)。
-推理计时、动作检查和自动图表见 [inference benchmark](../../inference/README.md)。
+优化默认关闭，`modulation`、`gated_residual`、`cuda_graph` 独立选择。整数用 `--precision int8|int4 --quant-scope dit`，旧协议保持 `--quant none`；可加 `shared_quant`、`activation_quant_fusion`。`modulation_quant` 需整数精度与modulation，融合调制/量化并保留原生LayerNorm。`--precision int8 --quant-scope dit --quant-tier N` 选择 [渐进INT4覆盖](../../../docs/protocols/progressive-quantization.md)。
 
-`vae_norm_fusion`、`vae_silu_fusion` 和 `vae_condition_prefix` 复用与 RoboCasa
-相同的 VAE 实现。LIBERO 在原生16帧编码窗口下执行33帧中的前17帧，保留完整9帧
-latent/噪声/DiT形状；该优化仅保证声明范围内的动作输出，不保留辅助 clean-latent
-后缀。完整命令、实测口径和实验性选项见 [Cosmos 量化指南](../../../docs/cosmos-quantization.md)。
+`vae_norm_fusion`、`vae_silu_fusion`、`vae_condition_prefix` 与RoboCasa共享实现。LIBERO使用原生16帧编码窗口，执行33帧中的前17帧，保留9帧latent/噪声/DiT形状；动作输出优化省略辅助clean-latent后缀。命令、数值检查和计时见 [inference benchmark](../../inference/README.md)。

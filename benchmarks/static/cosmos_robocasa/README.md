@@ -1,16 +1,16 @@
 # Cosmos Policy＋RoboCasa 单环境实验
 
-[run.sh](run.sh) 运行一个固定任务和厨房布局，每次只推进一个环境。模型由共享 [CosmosEngine](../../../src/robotics_bench/engines/cosmos.py) 的 `suite=robocasa` 分支加载，环境由 [RoboCasa adapter](../../../src/robotics_bench/simulators/robocasa.py) 管理，同步和论文历史观测异步复用 [static_runner](../../../src/robotics_bench/protocols/static_runner.py)。
+[环境配置](../../../docs/environment_setup.md) · [配对实验步骤](../../../docs/hands-on.md#static)
 
-策略输入是左、右外部相机及腕部相机的原始 RGB，加上9维 proprio。模型预测 H=32 个7维动作，默认执行前 n=16 个再请求下一块。默认采用 BF16；`--precision int8|int4 --quant-scope dit` 启用仓内整数推理，旧协议参数 `--quant` 保持 `none`。该入口采用直接动作生成路径。
+使用 [run.sh](run.sh) 在一个固定任务和厨房布局中运行 Cosmos Policy，可选择同步或历史观测异步。[CosmosEngine](../../../src/robotics_bench/engines/cosmos.py) 加载 `suite=robocasa` 模型，[adapter](../../../src/robotics_bench/simulators/robocasa.py) 管理场景，[static_runner](../../../src/robotics_bench/protocols/static_runner.py) 执行动作。
+
+模型读取左、右、腕部三路 RGB 图像和9维 proprio，预测 H=32 个7维动作，默认执行前 n=16 个。默认精度为 BF16；选择整数精度时使用 `--precision int8|int4 --quant-scope dit`，旧的 `--quant` 参数保持 `none`。
 
 ## 环境和资源
 
-CPU工具与各case环境的安装边界、版本表和故障排查见 [环境指南](../../../docs/environment_setup.md)。
+按 [官方说明](https://github.com/NVlabs/cosmos-policy/blob/main/ROBOCASA.md) 安装 [RoboCasa fork](https://github.com/moojink/robocasa-cosmos-policy)。已验证的组合是 [edd9a328b3ec98050f42d194c1419307a79c4d87](https://github.com/moojink/robocasa-cosmos-policy/commit/edd9a328b3ec98050f42d194c1419307a79c4d87)、robosuite 1.5.1、MuJoCo 3.2.6、Python 3.10 和 PyTorch 2.7.0+cu128。请与 LIBERO 所需的 robosuite 1.4.0 环境分开安装，并让一个进程只运行一种 Cosmos case。
 
-使用 [Cosmos 官方说明](https://github.com/NVlabs/cosmos-policy/blob/main/ROBOCASA.md) 指定的 [robocasa-cosmos-policy fork](https://github.com/moojink/robocasa-cosmos-policy)。已验证源码为 [edd9a328b3ec98050f42d194c1419307a79c4d87](https://github.com/moojink/robocasa-cosmos-policy/commit/edd9a328b3ec98050f42d194c1419307a79c4d87)，配合 robosuite 1.5.1、MuJoCo 3.2.6、Python 3.10 和 PyTorch 2.7.0+cu128。环境与 LIBERO 所需 robosuite 1.4.0 分开配置；一个 Python 进程只加载一种 Cosmos case，避免原生全局平台常量串用。
-
-所需文件：RoboCasa 专用 Policy `.pt`、`robocasa_dataset_statistics.json`、`robocasa_t5_embeddings.pkl`、配套 VAE，以及 Cosmos 源码内的 `robocasa_controller_configs.pkl`。提供完整路径模板 [paths.env.example](paths.env.example)，也可以用资源工具下载或复用已有文件：
+[路径模板](paths.env.example) 绑定RoboCasa Policy `.pt`、`robocasa_dataset_statistics.json`、`robocasa_t5_embeddings.pkl`、VAE和Cosmos提供的 `robocasa_controller_configs.pkl`：
 
 ```bash
 python -m pip install -r tools/requirements-download.txt
@@ -21,20 +21,18 @@ python tools/prepare_resources.py --case cosmos_robocasa \
 source ~/.cache/robotics/env/cosmos_robocasa.env
 ```
 
-默认 checkpoint 和 VAE 位于 `~/.cache/robotics/hub/`，可以通过 `--root` 更改。`--reuse policy=DIR --reuse vae=DIR` 复用本地资源；需要训练/校准轨迹时才加 `--with-dataset`，数据集是 `nvidia/RoboCasa-Cosmos-Policy`。模型依赖按环境指南安装，厨房资产按下方命令准备。
-
-厨房资产使用兼容 fork 的下载脚本，放在该源码目录的 `robocasa/models/assets/` 下。应在可写的独立源码目录运行；源码和资产不放进本仓 Git：
+checkpoint/VAE默认写入 `~/.cache/robotics/hub/`，`--root` 改缓存位置，`--reuse policy=DIR --reuse vae=DIR` 复用资源。`--with-dataset` 可下载训练/校准轨迹 `nvidia/RoboCasa-Cosmos-Policy`。厨房资产在已安装、可写的fork中单独准备：
 
 ```bash
 "$ROBOTICS_COSMOS_ROBOCASA_PYTHON" \
   "$ROBOTICS_ROBOCASA_SOURCE/robocasa/scripts/download_kitchen_assets.py"
 ```
 
-该命令要求 fork 已在所选环境安装。运行入口会显式绑定 `--robocasa-source`；模型和环境路径可全部通过 CLI 覆盖环境变量。资产预检检查场景、固定设施、纹理及 Objaverse 目录，完整 mesh/texture 可加载性由环境初始化验证。已验证环境复用了现有packages；新机器先核对上述版本，再完成预检和单回合初始化。
+厨房资产保存在 fork 的 `robocasa/models/assets/`。命令行路径会覆盖 env 配置。预检先检查场景、设施、纹理和 Objaverse 目录，首次初始化再确认网格和纹理能正常加载。
 
 ## 启动
 
-从本仓库根目录运行；每次实验使用新输出目录：
+从仓库根目录执行，每次使用新输出目录：
 
 ```bash
 # CPU preflight: no model, simulator, GPU or output directory is created.
@@ -57,19 +55,17 @@ bash benchmarks/static/cosmos_robocasa/run.sh \
   --output-dir runs/static/cosmos_robocasa/async-001
 ```
 
-`--task` 接受该 checkpoint 对应的24个旧版任务名。使用checkpoint对应的原始任务名，GPU接入记录见下方 `TurnOffMicrowave` 示例。一次命令选择一个任务和一个 layout/style 对；`--episodes N` 在该组合运行 N 回合，环境种子依次为 `env_seed + episode_index`。该任务、布局和种子列表构成本次评估集合。
-
-`--max-steps` 默认使用任务预算，例如 `TurnOffMicrowave` 为500。`--seed` 默认195，控制模型采样；`--n-action-steps` 默认16，允许1..32；去噪步数 `--num-inference-steps` 默认5。上述配置先形成明确的 episode 清单，再执行模型和模拟器。
+`--task` 接受 checkpoint 对应的24个原始任务名。一次命令选择一个任务和一个 layout/style 组合，`--episodes N` 依次使用 `env_seed + episode_index` 作为环境种子。默认模型 seed 为195，每块执行16个动作（可选1..32），去噪步数为5。`--max-steps` 默认沿用任务预算，例如 `TurnOffMicrowave` 为500步。
 
 ## 初始化、异步与动作
 
-每个 episode 创建新的 seeded 环境，调用一次公开 reset，在 reset 后读取 `get_ep_meta()["lang"]`。随后执行10步 settling，记为准备阶段；首次策略控制从第0步计数。模型加载一次，预计算 T5 缓存保留在 CPU，根据实际指令取对应 embedding；缺少指令缓存时明确失败，不在推理中联网下载或临时加载 T5 模型。
+每个回合创建带指定 seed 的环境，在 reset 后读取 `get_ep_meta()["lang"]`，再执行10步 settling。策略控制从第0步开始计数。模型与 CPU 上的 T5 缓存会在回合间复用，当前指令必须能在缓存中找到对应 embedding。
 
-7维策略动作只在确认原生 `HYBRID_MOBILE_BASE` 控制器、机械臂/夹爪索引和剩余底盘/躯干区间后映射到12维动作，附加 `[0,0,0,0,-1]`。控制器不匹配则报错。成功使用原生 `_check_success()` 判断，真实完成的 `env.step` 才计入控制步数。
+适配器先核对 `HYBRID_MOBILE_BASE` 控制器和关节索引，再给7维模型动作追加 `[0,0,0,0,-1]`，形成模拟器需要的12维动作。成功由原生 `_check_success()` 判断，每次完成的 `env.step` 计为一个控制步。
 
-`paper_async` 在每次请求时选择 `t−n′` 的三相机和 proprio 快照；历史不足使用当前观测，`0 ≤ n′ ≤ n`。runner串行推进环境，用历史观测实现论文静态抽象。`--paper-action-time-ms` 默认50，仅作为声明的周期估计参数，环境实际控制步长单独记录；没有提供同配置 `--paper-inference-time-ms` 和来源时不生成加速比。
+`paper_async` 在控制步 t 选择 t−n′ 的三相机和 proprio 快照，历史不足时使用当前观测，范围是 `0 ≤ n′ ≤ n`。推理和环境仍按顺序执行。`--paper-action-time-ms` 默认50，用于估算论文周期；环境实际控制步长单独记录。计算加速比还需要同配置的 `--paper-inference-time-ms` 及其来源说明。
 
-`--reference-run` 要求对应运行已完成、任务及布局/种子清单相同，并在首次推理前比较初始物理状态、场景 XML、三相机观测及指令指纹。起点不同会使运行失败，不会算作策略失败。保存的状态用于审计，当前没有通用跨版本状态恢复入口。
+做配对实验时，将 `--reference-run` 指向已经完成的基线，保持任务、布局和 seed 列表相同。程序在第一次推理前比较物理状态、XML、图像和指令指纹；发现差异会报初始化错误。保存的状态供排查使用，目前不用于跨版本恢复环境。
 
 ## 输出与验证范围
 
@@ -84,19 +80,10 @@ bash benchmarks/static/cosmos_robocasa/run.sh \
 | `videos/TASK/` | 可选三视角横排 MP4，包含初始和终止帧 |
 | `failure.json` | 初始化、模型或其他运行异常；不伪装成有效失败 episode |
 
-视频默认关闭；`--record-video` 记录所有实际评估回合，`--no-record-video` 关闭。分辨率672×224，默认30 FPS 播放，播放帧率不改变仿真控制频率。
+`--record-video` 开启三视角672×224 MP4，`--no-record-video` 关闭（默认）。视频保留初始/终止帧，默认播放30 FPS，仿真频率单独记录。
 
-已在 RTX 6000 Ada 上完成同一任务、layout/style=1/1、环境种子0、模型种子195、H=32/n=16/5步采样的两次 GPU 闭环：同步277步成功、18次请求；论文异步 n′=2 在292步成功、19次请求。加载与覆盖审计通过，异步初态比对通过，请求偏移为首轮0、其后2；视频分别为278和293帧。该记录覆盖同初态的单回合同步/异步对照。量化与VAE的完整推理计时见 [Cosmos量化指南](../../../docs/cosmos-quantization.md)；任务加速比结合相同配置的闭环请求计数计算。
+已有 RTX 6000 Ada 单回合对照使用相同任务、layout/style=1/1、环境 seed0 和模型 seed195；预测 H=32、执行 n=16、采样5步。同步在277步成功，调用18次；n′=2异步在292步成功，调用19次。加载、覆盖和初态检查通过，异步首轮偏移为0，其后为2；视频分别含278帧和293帧。
 
-本入口也接受 `--model-runtime owned|native`、`--enable`、`--precision` 与
-`--integer-tactic`，量化范围固定为 `--quant-scope dit`。默认优化关闭。
-RoboCasa与LIBERO共享kernel/模型实现，各自使用匹配的输入、checkpoint和闭环结果评估优化。推理工具见 [inference benchmark](../../inference/README.md)。
+优化参数包括 `--model-runtime owned|native`、`--enable`、`--precision` 和 `--integer-tactic`，量化范围固定为 `--quant-scope dit`，默认关闭优化。先用 `capture_robocasa.py` 保存三相机观测，再在 [推理 benchmark](../../inference/README.md) 中选择 `--case cosmos_robocasa`，测量 BF16、INT8/INT4 或融合开关。任务收益则使用同配置的闭环结果。
 
-固定输入计时支持 `--case cosmos_robocasa`，使用RoboCasa专用资源变量和H=32；
-可通过 `benchmarks/inference/capture_robocasa.py` 捕获真实三相机观测，再比较
-BF16、INT8、INT4以及独立卷积、VAE逐元素融合、DiT attention后端开关。
-这些开关默认关闭，完整调用计时不含模拟器推进；模型任务质量需单独闭环验证。
-
-VAE 前缀裁剪与 LIBERO 共用同一适配器，RoboCasa 保留自己的41帧原始输入、11帧
-latent、5帧条件和三相机契约，在原生编码窗口下只执行前17帧。仅动作输出适用，
-辅助 clean-latent 后缀不保留。该选项与 VAE 归一化/SiLU 融合可分别回退。
+VAE前缀优化与LIBERO共享实现：RoboCasa原始41帧、latent 11帧、条件5帧，编码执行前17帧。它适用于动作输出，省略辅助clean-latent后缀；归一化/SiLU融合可独立开关。配方与计时见 [Cosmos量化指南](../../../docs/cosmos-quantization.md)。

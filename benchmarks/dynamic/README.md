@@ -1,14 +1,14 @@
 # 动态任务实验入口
 
-动态任务按case维护自己的模型、环境与时间协议，共享统计和产物约定。
+[环境配置](../../docs/environment_setup.md) · [分步实验](../../docs/hands-on.md#dynamic) · [§4.5预测器](../../docs/kinetix-latency-study.md)
+
+先选择要研究的动态任务。下面两个入口各自管理模型、模拟器和延迟处理方式：
 
 | Case | 当前状态 | 执行路径 |
 | --- | --- | --- |
 | [KINETIX](kinetix/README.md) | 已有仓内源码和可执行入口 | RTC JAX flow policy＋KINETIX/Jax2D；fine/coarse延迟、flow步数/延迟配对矩阵、完整视频与统计 |
 | [DynamicVLA＋DOM](dynamicvla_dom/README.md) | 原生单环境入口 | 仓内模型/DOM源码、独立Isaac环境、原生non-streaming/streaming |
 
-KINETIX的实际模型、环境、物理核心和关卡代码位于 `src/robotics_bench/kinetix/`，没有外部源码运行依赖。框架环境和checkpoint路径通过case模板配置。DOM使用自己的DynamicVLA checkpoint、Isaac环境与场景资源，按独立case配置。
+KINETIX 的模型、关卡和 Jax2D 物理代码都在仓内，适合独立改变采样步数和虚拟延迟。DOM 使用 DynamicVLA checkpoint 和 Isaac 场景，适合观察物体持续运动时的流式执行。先按对应 README 准备资源；时间定义和实现区别见 [仿真协议](../../docs/protocols/simulation.md)。
 
-KINETIX默认保持原生物理网格，通过执行器指令混合近似分数时间槽内的动作切换；旧控制继续推进世界。它在虚拟时间轴上重放动作可用性；静态 `paper_async` 则按控制步回取历史观测。详见 [时间协议](../../docs/protocols/simulation.md)、[参考代码整理](../../docs/kinetix-reference-review.md) 和 [case命令](kinetix/README.md)。
-
-运行产物放 `runs/dynamic/<case>/`。报告分别记录虚拟延迟、host调用时间、实际任务/种子覆盖、质量与预算。真实硬件加速比使用独立计时的同范围baseline。静态入口见 [static](../static/README.md)。
+运行结果放在 `runs/dynamic/<case>/`。查看结果时分别读取虚拟延迟、宿主运行时间、任务和 seed 列表、成功率及步数预算。硬件加速比需要另做相同计时范围的测量。历史实现说明见 [参考整理](../../docs/kinetix-reference-review.md)，静态任务见 [static](../static/README.md)。

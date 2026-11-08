@@ -9,9 +9,9 @@
 
 Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hongyang Jia
 
-[论文 PDF](https://arxiv.org/pdf/2606.28529) · [引用](#citation) · [环境配置](docs/environment_setup.md) · [贡献指南](CONTRIBUTING.md)
+[论文 PDF](https://arxiv.org/pdf/2606.28529) · [引用](#citation) · [环境配置](docs/environment_setup.md) · [实验实操](docs/hands-on.md) · [§4.5预测器](docs/kinetix-latency-study.md) · [贡献指南](CONTRIBUTING.md)
 
-把推理优化与任务结果连接起来。本仓提供上述论文的模型引擎、低精度算子与闭环评估工具，在匹配的任务场景下比较量化、异步执行和采样步数，联合测量推理耗时、成功率与动作数。
+这个项目提供论文使用的模型推理引擎、低精度算子和仿真实验脚本。你可以固定模型和任务，比较量化、异步执行和采样步数对推理时间、任务成功率及动作数量的影响。
 
 从下表选择 case，准备对应的模型与模拟器环境，再运行基线和待评估的优化方案。各指南提供资源、命令和验证记录；[许可与来源](THIRD_PARTY_NOTICES.md)单独维护。
 
@@ -36,7 +36,8 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 | --- | --- |
 | 将部分 Cosmos DiT 层替换为 INT4 | [渐进式 T0–T10 配置](docs/protocols/progressive-quantization.md) |
 | 比较同步与论文历史观测异步 | 下表中的静态 case 指南 |
-| 改变采样步数和模拟延迟 | [KINETIX 实验工作流](docs/kinetix-latency-study.md) |
+| 改变采样步数和模拟延迟 | [动态实验实操](docs/hands-on.md#dynamic) |
+| 用质量与延迟校准预测最佳采样步数 | [§4.5预测器：八步实操](docs/kinetix-latency-study.md) |
 | 在运动物体任务中运行流式推理 | [DynamicVLA＋DOM](benchmarks/dynamic/dynamicvla_dom/README.md) |
 | 测量完整 policy 时延与任务级加速比 | [推理 benchmark](benchmarks/inference/README.md)和[指标定义](docs/protocols/speedup-metrics.md) |
 
@@ -44,7 +45,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 ## 支持的模型与任务
 
-模型、checkpoint、任务和模拟器按 **case** 绑定；下表中的组合有各自的运行入口和环境。
+项目把一组模型和任务环境的搭配称为 **case**。每个 case 都有自己的启动脚本和环境配置，可以从下表选择。
 
 | 类型 | Case / 运行指南 | 当前实现 |
 | --- | --- | --- |
@@ -81,42 +82,18 @@ python tools/embodied/trajectory_metrics.py --input tools/embodied/examples/smoo
 
 以上示例使用合成数据。轨迹绘图依赖和 jerk 等指标的说明见[轨迹分析工具](tools/embodied/README.md)。可选 `python -m pip install -e .` 安装本仓 Python 包；各模型和模拟器运行栈需另行安装。
 
-### 2. 准备 case 环境与资源
+### 2. 运行实验
 
-按[环境指南](docs/environment_setup.md)和上表对应 case 的说明配置独立环境，并填写该入口的 `paths.env.example`。DynamicVLA＋DOM 和 LingBot＋RoboTwin 分别配置模型与模拟器环境；KINETIX 使用独立 JAX 环境。
+[环境配置](docs/environment_setup.md)说明如何复用已验证环境，以及在新机器准备模型、模拟器与资源。完成后选择一条实操路线：
 
-π0.5 与 Cosmos 可使用独立的[资源准备工具](tools/RESOURCE_PREPARATION.md)下载或复用本地资源。以下命令仅预览；确认后移除 `--dry-run` 执行下载：
-
-```bash
-python -m pip install -r tools/requirements-download.txt
-python tools/prepare_resources.py --case cosmos_robocasa --dry-run
-```
-
-| 资源或产物 | 默认位置 |
+| 实验 | 指南 |
 | --- | --- |
-| 工具下载的模型与可选训练数据 | `~/.cache/robotics/hub/`；通过 `--root` 或 `ROBOTICS_RESOURCE_ROOT` 调整资源根目录 |
-| 工具生成的路径配置 | `~/.cache/robotics/env/<case>.env` |
-| LIBERO 资产 | `~/.cache/libero/assets/` |
-| RoboCasa 厨房资产 | 对应 fork 的 `robocasa/models/assets/`，单独准备 |
-| 实验产物 | 命令显式指定的 `--output-dir`，建议置于 `runs/` |
+| 静态量化、paper_async及组合 | [静态实验实操](docs/hands-on.md#static) |
+| 动态质量—延迟矩阵与原生streaming | [动态实验实操](docs/hands-on.md#dynamic) |
+| 硬件计时与延迟场景 | [硬件实验实操](docs/hands-on.md#hardware) |
+| §4.5预测器：校准→冻结→验证 | [Predictive TISED case study](docs/kinetix-latency-study.md) |
 
-LingBot、KINETIX 和 DOM 按各自指南绑定资源。实验入口使用离线资源；资源下载完成后，仍需完成对应模型和模拟器的环境安装。
-
-### 3. 启动闭环实验
-
-以环境和资源已准备好的 Cosmos＋RoboCasa 为例，先做资源预检：
-
-```bash
-source ~/.cache/robotics/env/cosmos_robocasa.env
-bash benchmarks/static/cosmos_robocasa/run.sh \
-  --task TurnOffMicrowave --episodes 1 \
-  --schedule paper_async --overlap-actions 2 \
-  --output-dir runs/static/cosmos_robocasa/demo-001 --dry-run
-```
-
-预检通过后，去掉 `--dry-run`，添加 `--gpu 0` 选择本机空闲 GPU；添加 `--record-video` 录制完整回合。每次新实验使用独立输出目录。
-
-批量动态实验见 [KINETIX 采样步数评估](docs/kinetix-flow-quality.md)和[延迟实验工作流](docs/kinetix-latency-study.md)。DOM 的 `--streaming`、模型/模拟器 GPU 和视频开关见[原生运行指南](benchmarks/dynamic/dynamicvla_dom/README.md)。
+各指南提供命令、每步预期生成的文件和结果解读方法。资源路径保存于 `.local/<case>.env`，实验产物写入 `runs/` 下显式选择的 `--output-dir`。
 
 <a id="architecture"></a>
 

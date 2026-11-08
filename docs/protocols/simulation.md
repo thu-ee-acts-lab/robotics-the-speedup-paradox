@@ -1,8 +1,8 @@
 # 仿真时间、异步推理与实验记录协议
 
-版本：设计规范 v0.1。当前提供manifest/trace的schema与部分事件一致性校验；π0.5＋LIBERO入口通过兼容外部评测器支持同步与论文静态抽象 `paper_async`。通用调度器、模拟器和推理worker尚未内置。可执行校验的范围以对应入口、schemas、tools/validate_contracts.py和tests为准。
+版本：设计规范 v0.1。实现或修改推理调度时，用本页明确环境什么时候推进、动作什么时候可以执行，以及日志中的时间表示什么。通用时钟和队列部分是扩展设计；运行现有 case 请看 [操作指南](../hands-on.md)，记录格式见 [数据契约](artifacts.md)。
 
-协议的核心是区分 **物理环境时间、程序墙钟时间、动作等待时间和观测年龄**。相同 policy、seed、delay profile 和协议版本应得到可解释、可回放的事件序列。
+实验分别记录 **物理环境时间、程序墙钟、动作等待和观测年龄**。固定 policy、seed、delay profile 和协议后，这些记录应能解释并回放完整执行过程。
 
 ## 两条独立的配置轴
 
@@ -15,11 +15,11 @@
 | `history_observation` | 同步host控制流，提供过去n′个动作对应的观测 | `paper_async`的实现方式，也可单独作为历史观测消融 |
 | `async` | 当前动作执行中发起后续请求；结果就绪后按队列规则接管 | 验证真实 overlap 和状态一致性 |
 
-`paper_async` 是独立case manifest的标签，不加入或重定义通用v1 schema的schedule枚举。π0.5＋LIBERO使用 `overlap_actions=n′`，范围 `0≤n′≤n_action_steps`，默认执行长度n为5；入口映射到外部 `eval.async_delay`。论文附录B.1规定历史观测偏移，但未规定state和warmup；本case选择 `same_snapshot`（图像和state同源）及 `current_until_available`（历史不足时取当前观测），不得将这两项工程选择归于论文。[The Speedup Paradox，§3.1与B.1](https://arxiv.org/html/2606.28529v2)
+`paper_async`使用独立 case manifest；通用 v1 的 schedule 枚举保持原定义。π0.5＋LIBERO 将 `overlap_actions=n′` 映射为外部 `eval.async_delay`，范围 `0≤n′≤n_action_steps`，默认 n=5。论文定义历史观测偏移；本 case 另行定义 `same_snapshot`（图像/state 同源）与 `current_until_available`（历史不足取当前观测）。[论文§3.1 与 B.1](https://arxiv.org/html/2606.28529v2)
 
-[LingBot＋RoboTwin](../../benchmarks/static/lingbot_robotwin/README.md) 的有状态扩展同时延迟KV/VAE观测流：名义关键帧k取max(0,k−n′)，负索引重复初始快照，保持观测时间单调；推理边界t的最新缓存观测为t−n′。原生首块执行16条、后续32条，n′限制在0..16。预测动作缓存条件沿用原始动作块，与测量state明确区分。该case仍串行执行，指令的物理时长可变，当前不据此生成固定Tact的论文加速比；具体约定随manifest和 `paper-async.json` 记录。
+[LingBot＋RoboTwin](../../benchmarks/static/lingbot_robotwin/README.md) 的有状态扩展同时延迟 KV/VAE 观测流：名义关键帧 k 取 max(0,k−n′)，负索引重复初始快照，保持观测时间单调；推理边界 t 的最新缓存观测为 t−n′。原生首块执行 16 条、后续 32 条，n′限制在 0..16。预测动作缓存条件沿用原始动作块，与测量 state 明确区分。该 case 仍串行执行，指令的物理时长可变，当前不据此生成固定 Tact 的论文加速比；具体约定随 manifest 和 `paper-async.json` 记录。
 
-论文§3.1 Eq.3的周期是 `C=Tinf+n*Tact−min(Tinf,n′*Tact)`。π0.5入口将其记录为 `paper_model`；默认 `Tact=1000/30 ms` 只是解析模型假设，不修改control/physics dt。`Tinf`必须显式提供并说明来源，缺少时不生成周期或加速比。宿主 `eval_s` 是实际程序耗时，不能代替论文C；历史观测模式的质量实验可独立运行。
+论文周期为 `C=Tinf+n*Tact−min(Tinf,n′*Tact)`，记录为 `paper_model`。π0.5 默认 `Tact=1000/30 ms`，独立于 control/physics dt；`Tinf`需声明来源，缺失时周期/加速比为空，质量实验仍可运行。`eval_s`单列宿主耗时。
 
 | clock / delay mode | 推理时环境如何推进 | 延迟来源 |
 | --- | --- | --- |
@@ -29,11 +29,11 @@
 | `realtime` + `additive` | 在实际就绪后增加额外等待，世界继续推进 | 实际延迟 + 注入延迟 |
 | `realtime` + `target_total` | 仅补足目标总延迟的剩余部分 | `max(0, target - measured_so_far)`；超过目标必须记录 overshoot |
 
-`virtual` 下真实 CPU/GPU 推理耗时只作为 profiling 数据，不再叠加进已经重放的目标延迟，否则会重复计费。若宿主计算比目标 profile 慢，虚拟时钟在最早需要该结果的事件处暂停等待宿主完成，host elapsed 增长但 sim time 不追加此等待；这不是实时能力证明。`zero` 也不是“模型真能零延迟”，报告必须带模式名称。`paper_model` 独立于上述环境时钟/延迟模式；n′对应观测偏移，解析重叠时间不冒充实际测得的并发区间。
+在 `virtual` 模式下，sim time 按目标延迟推进，真实 CPU/GPU 耗时单独记录。如果宿主算得更慢，就在首次需要结果时等待，增加的是 host elapsed。`zero`表示零仿真延迟，报告中保留这一标签。`paper_model`记录解析周期，n′表示观测偏移；实际并发区间仍从事件测量。
 
 ## 时钟及事件字段
 
-最小事件 envelope：`schema_version, run_id, episode_id, event_seq, event_type, clock_domain, timestamp_ns`。每个进程另记 `process_id, monotonic_origin`；不同机器的 monotonic 时间不能直接相减。需要跨机器关联时保存时钟对齐方式及误差，否则只报告各域内部 duration。
+最小 envelope 为 `schema_version, run_id, episode_id, event_seq, event_type, clock_domain, timestamp_ns`。进程另记 `process_id, monotonic_origin`；跨机器时间差需时钟对齐方法及误差，否则仅计算各域内部 duration。
 
 关键关联字段：`observation_id, request_id, chunk_id, action_index, sim_tick`。配置和 artifact 用独立 manifest 存储并通过 hash 关联，事件中无需重复塞入完整配置。
 
@@ -48,7 +48,7 @@
 | `queue_underrun` / `result_dropped` | 无可执行动作 / 按协议弃结果 | 原因、队列长度、epoch |
 | `episode_finished` | 首次 success、timeout 或 task failure | terminal reason、成功标记、budget 类型 |
 
-device kernel 计时单列为 `duration_ns` 及设备时钟域；host trace 与 CUDA event 不能假装共用 epoch。实际异步请求完成应对应动作真正可读，不能把 enqueue 的返回时刻记录成完成。
+kernel 计时用 `duration_ns` 与设备时钟域单列，host trace 使用自身 epoch。异步完成时刻以动作真正可读为准，设备 enqueue 另记。
 
 ## 三个常被混淆的量
 
@@ -59,29 +59,29 @@ boundary_wait = max(0, next_action_started - previous_chunk_boundary)
 release_wait = max(0, result_released - previous_chunk_boundary)
 ```
 
-这些差值必须在同一个有效时间域计算。后续 action 的 age 会继续增长，故每个动作都保留来源 observation，不能只在 chunk 首动作测一次。
+同一时间域内计算差值；每条动作保留来源 observation，以记录块内持续增长的 age。
 
 手算例子：t=0 ms 采样新观测并开始推理，旧 chunk 还会执行到 t=120 ms，新结果在 t=80 ms 就绪，首个新动作在 t=120 ms 开始。此时 `boundary_wait=0`，`observation_age=120 ms`，`policy_pipeline=80 ms`。完全隐藏推理等待也不能消除观测陈旧。若新结果 t=180 ms 才就绪，则等待 60 ms、观测年龄 180 ms。该例应成为规范测试。
 
-历史分析中的剩余等待代理量应单独命名；实际 observation age 始终通过动作与观测时间戳获得。历史观测回取与真实异步是两个独立协议，不能混称为已测得的并发性能。
+剩余等待代理量单独命名；observation age 由动作与观测时间戳计算。历史观测实验与真实并发分别报告。
 
 ## 环境推进与队列规则
 
-静态质量基线可在推理期间冻结 simulator；动态实验要在延迟期间推进世界动力学。仅 `time.sleep()` 而不调用环境 step，不能模拟物体在推理时运动。是否保持机器人最后一个控制指令、保持位置或采用专用 idle controller 由 task adapter 定义；位置控制下“全零动作”未必是安全保持，不能作为通用默认值。
+静态质量基线可冻结推理期间的环境；动态延迟由环境 step 推进世界。task adapter 声明等待时采用末次指令、位置保持或 idle controller；零动作须按控制器语义验证后使用。
 
-后续配置显式声明 `world_progression=frozen_during_inference` 或 `advance_during_delay`，与 schedule 和视频播放方式独立。当前 v1 schema 尚未包含该字段，增加生产者时先提交契约扩展。状态恢复回放、动作积分回放与 policy 闭环也分别标识：只有实际 policy 闭环结果才能作为该策略的任务成功证据。
+`world_progression=frozen_during_inference` / `advance_during_delay`作为独立配置扩展，加入 v1 前先更新契约。状态恢复、动作积分 replay 与 policy 闭环分别标识；策略任务成功率来自真实 policy 闭环。
 
 新的虚拟协议用整数 tick 或时间累加器推进，使长期累计的控制时刻与目标时间一致；不要每次延迟独立四舍五入造成系统偏差。历史 Kinetix 复现可单独使用 `legacy_round` 映射以保留原论文 round(tau/33.33ms) 语义，禁止把新映射结果混作历史曲线。小于 physics dt 的延迟也必须保留余量。控制 dt、physics dt、实际积分 substeps 和剩余时间都写入配置。
 
-以下队列与Future规则用于可选的实际并发 `async` 扩展，不是 `paper_async` 的验收门槛。首版实际并发限定每个policy一个在途请求，队列有界。观察线程只能写入snapshot/mailbox，policy worker不能操作可变env。触发点由队列剩余动作或明确模拟/墙钟时间决定；请求时机和实际重叠时长以队列与完成事件为准。
+以下规则用于实际并发 `async` 扩展：每个 policy 一个在途请求、队列有界；观察线程写 snapshot/mailbox，worker 隔离于可变 env。触发点由剩余动作或指定时钟决定，请求与重叠区间通过队列/完成事件记录。静态 `paper_async`沿用历史观测协议。
 
-默认先完成旧 chunk 再接新 chunk，便于对齐同步 baseline。后续 `replace_pending` 或按 action valid-time 丢弃过时前缀作为独立协议增加，声明新旧 chunk 的交接位置、空队列行为及 late-result 行为。禁止静默重复最后动作、无限缓存结果或随意截断输出来改善数字。
+默认完成旧 chunk 再交接。`replace_pending`和按 valid-time 丢弃前缀作为独立协议，声明交接位置、空队列、late-result 及队列上限；重复或截断动作均需明确规则和记录。
 
 episode reset 增加 epoch；旧 epoch 的 Future 即使完成也必须丢弃。episode 在推理/注入等待期间达到 terminal，应立即逻辑结束并拒绝动作；在途 CPU/GPU 请求隔离并等待完成或可靠取消后，才能释放其输入输出和 workspace，结果稍后返回不能继续执行。必须覆盖推理异常、worker 退出、取消/超时、输出非法值、队列耗尽与 late completion。
 
-预算检查发生在是否允许开始下一动作的决策前，执行完第 K 个动作后不得因计数更新顺序再执行 K+1 个。终止记录和视频末帧都应能追溯到同一次终止决策，不能让慢渲染推迟它。
+每次开始下一条动作前检查预算，确保 K 步上限不会执行到 K+1。terminal 记录和视频末帧应对应同一次终止决定，不能等渲染完成才结束回合。
 
-真实时间模式的 simulator runner 不等待 `Future.result()` 后才判断是否应该 step。worker 与 runner 需避免 GIL、CUDA 同步或渲染导致隐性串行；可用独立进程，但选择须以 trace 验证。runner 记录 deadline miss 和 real-time factor；无法维持控制频率时报告超期，不把 host 调度拖慢误报成可控注入延迟。
+实时 runner 按 deadline 推进环境，不在等待 `Future.result()` 时停住。用 trace 检查 GIL、CUDA 同步和渲染是否阻塞控制循环，必要时拆分进程。记录 deadline miss 和 real-time factor，把运行超期与注入延迟分开。
 
 ## 可复现实验 manifest
 
@@ -89,20 +89,20 @@ episode reset 增加 epoch；旧 epoch 的 Future 即使完成也必须丢弃。
 
 delay profile 附带 scope（仅 forward 或完整 perception→action pipeline）、硬件、输入形状、精度、denoise step、预热方法、原始样本。均值重放、IID 重采样、保序 trace 重放应作为不同实验；发生时间相关抖动时只保存均值无法重现尾部风险。远程网络延迟单列。设备 label 不足以唯一标识 profile。
 
-实验拆成三组：固定零延迟测质量；固定 policy 测延迟响应；使用真实硬件 profile 联合比较。跨方法同时保留原始配置和实测 inference speedup，按相近延迟或质量约束比较，不能将 INT4 层数与 denoise steps 的横坐标直接视作同等强度。
+实验分为零延迟质量、固定 policy 延迟响应、硬件 profile 联合比较三组，操作见 [预测器指南](../kinetix-latency-study.md)。跨方法同时保留原始配置与实测 inference speedup，按相近延迟或质量约束比较。
 
 ## 任务级指标及失败
 
-每组必须报告 trials、successes、SR 与区间、成功条件下 task time/chunk count、所有 rollout 的终止原因及耗时、timeout budget。manifest 明确 task budget 的 sim/wall clock domain、起点事件以及独立 host watchdog；不同时间域预算不能混比。成功数为 0 时成功条件时间为 null，不能填 0 或以空均值参与排序。
+每组报告 trials、successes、SR 及区间、成功条件 task time/chunk count、全部终止原因/耗时和 timeout budget。预算声明 sim/wall 域、起点及独立 host watchdog，按同域比较。零成功时成功条件时间为 null 并排除排序。
 
 保留两套明确命名的失败处理：
 
 1. `paper_legacy`：为需要兼容的历史实验，按它的动作/chunk 上限和配置相关 `Tmax=Nmax*Tchunk` 计算 penalty，并显示其 budget。
 2. `fixed_budget`：新的跨配置主比较固定任务秒数预算 B，`penalized_time=(sum(success completion time)+failures*B)/trials`。同时报告真实终止耗时，避免将 penalty 误称为实测耗时。
 
-失败包含 task failure 与 timeout；运行基础设施错误单独计数，不能无声删除或当成策略失败。若不同配置成功的 seed 集不同，成功条件均值可能有选择偏差；报告共同成功 seed 的配对结果及全部 seed 的 SR/penalty。区间计算以独立 episode 为单位；多任务结果分任务汇报后再定义聚合权重。
+失败包含 task failure 与 timeout，基础设施错误单独计数。成功 seed 集合不同的配置，同时报告共同成功 seed 的配对结果与全体 SR/penalty。区间以独立 episode 计算；多任务先分项、再按声明权重聚合。
 
-静态论文模型按 `N*Tcycle` 单列任务时间估计。实际执行trace允许首尾不完整chunk、变长推理和pipeline fill/drain，其任务时间取事件测量，不硬套常数公式。把paper_model估计、simulated task time、wall elapsed和CUDA duration分列。
+静态 `N*Tcycle`为 paper_model 估计；真实任务时间从事件测量，包含首尾不完整 chunk、变长推理和 fill/drain。paper_model、simulated task time、wall elapsed 与 CUDA duration 分列。
 
 TISED 的分量拟合、选点与验证使用分开的配置/seed 或 held-out 硬件。明确 O(n) 表述依赖分量可校准和可迁移假设，计入校准成本，并检查非分离的交互项。N 或质量曲线不强行单调拟合；模型不确定性要传递到候选 sweet spot。
 
@@ -125,10 +125,10 @@ TISED 的分量拟合、选点与验证使用分开的配置/seed 或 held-out �
 | 0 个成功 episode | SR=0，successful time=null，penalty=预算 |
 | 可视化消费者卡住 | 控制逻辑继续，显示丢帧可计数 |
 
-前两项是静态论文异步的配置与模型估计要求；其余是后续实际时钟/队列调度器的验收规格。通用契约校验只覆盖字段与事件一致性，不能证明这些实际调度行为。π0.5入口已有模型smoke，覆盖范围以case记录为准；后续实际并发扩展可先用CPU fake clock/policy/simulator验证时间线。
+前两项用于静态论文异步；其余用于通用实际时钟/队列扩展。字段/事件由契约校验器检查，调度行为可先用 CPU fake clock/policy/simulator 验收，再按 case 补充模型证据。
 
 ## KINETIX原生时间实现
 
-已实现的 [KINETIX case](../../benchmarks/dynamic/kinetix/README.md) 使用case专用 `kinetix-native-delay-run-v1` 产物，不冒充通用v1并行trace。默认native-blend保持物理dt、frame_skip、约束参数和控制边界终止判据；分数槽通过process后的执行器指令时间平均表示，不宣称精确重建槽内状态。初始旧队列为原生零动作，没有预取；宿主计算时间不叠加到虚拟release。每条控制记录新旧观测来源与各物理槽权重。
+[KINETIX case](../../benchmarks/dynamic/kinetix/README.md) 使用专用 `kinetix-native-delay-run-v1`。默认 fine（native-blend）保持物理 dt、frame_skip、约束参数及控制边界终止；分数延迟用 process 后的执行器指令时间平均近似，槽内状态仍按原生网格求解。旧队列从零动作开始，无预取；宿主耗时独立于虚拟 release。每条控制记录观测来源与物理槽权重。
 
-legacy-round在相同原生物理网格下保留控制周期取整敏感性对照，但仍使用当前case的direct启动规则，不能与完整历史RTC预取曲线混称。物理时间片细分属于独立模拟器数值研究。
+coarse（legacy-round）保留控制周期取整对照，使用本 case 的 direct 启动规则。历史 RTC 预取协议与物理时间片细分按独立配置研究。

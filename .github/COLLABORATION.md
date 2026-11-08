@@ -1,6 +1,6 @@
 # GitHub协作配置 / GitHub Collaboration
 
-正式协作规则见 [CONTRIBUTING](../CONTRIBUTING.md)。主题分支开发、双语提交/PR、审阅后以merge commit合并适用于代码和文档。
+代码与文档的分支、提交和审核流程见 [CONTRIBUTING](../CONTRIBUTING.md)。
 
 | 文件 | 作用 |
 | --- | --- |
@@ -22,9 +22,7 @@
 
 ## 服务端设置 / Server settings
 
-仓库文件定义协作流程和CI内容，服务端强制规则需要仓库管理员配置并核对。模板存在、CODEOWNERS存在或本地测试通过，都不证明远端保护已生效。
-
-维护者应核对：
+管理员在GitHub服务端配置并核对以下保护规则：
 
 1. 默认开发目标为 `main`，修改通过PR进入。
 2. 相关CI运行正常后，将 `CPU contracts` 设为必需状态检查。
@@ -32,6 +30,6 @@
 4. 禁止对 `main` force push和删除，按团队权限确定是否限制管理员绕过。
 5. 保留merge commit方式；不启用自动合并作为默认路径。
 
-保护分支的能力与规则以 [GitHub官方文档](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) 和仓库实际设置为准。只在读取到真实设置和运行结果后报告“已启用”。
+设置方式见 [GitHub分支保护文档](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)；记录实际启用的规则。
 
-Repository files describe the workflow; administrators must verify server enforcement separately. Configure PR-based changes to `main`, the `CPU contracts` check and real non-author review. Keep merge commits as the default and report only settings actually verified.
+Administrators verify PR-only changes to `main`, required `CPU contracts`, non-author review and force-push restrictions. Merge commits are the default; record the settings actually enabled.

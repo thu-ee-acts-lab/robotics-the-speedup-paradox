@@ -1,6 +1,6 @@
 # Protocol contracts, version 1.0.0
 
-These schemas validate serialized run settings and trace records. They do not run a policy, simulator, scheduler, or hardware profiler. A passing trace does not demonstrate control performance or paper reproduction.
+Use the validator to check a run manifest and its JSONL event log. It checks fields, references between observations/requests/actions, and event order. Use a case runner to execute models or evaluate tasks.
 
 From the repository root:
 
@@ -20,7 +20,7 @@ python tools/validate_contracts.py --manifest run.manifest.json --trace run.trac
 
 ## Manifest
 
-`run-manifest.schema.json` fixes `schema_version` to `1.0.0`. It requires the run identifier, an explicit `synthetic` flag, protocol settings, clock-domain declarations, episode IDs/seeds, and a task budget. This is a minimal protocol contract, not a full provenance manifest for trained models or benchmark results.
+`run-manifest.schema.json` fixes `schema_version` to `1.0.0`. It requires the run identifier, an explicit `synthetic` flag, protocol settings, clock-domain declarations, episode IDs/seeds, and a task budget. Model and benchmark provenance belongs in the corresponding case manifest.
 
 The schedule axis is independent of the clock/delay axis:
 
@@ -35,13 +35,13 @@ The schedule axis is independent of the clock/delay axis:
 | `virtual` | `zero`, `profile_replay` |
 | `realtime` | `measured`, `additive`, `target_total` |
 
-All three schedules can be combined with all five valid clock/delay pairs. `profile_replay` requires `profile_id`. Chunk prediction length and execution length are separate, with execution length no larger than prediction length. The validator does not infer historical-observation offsets or prove that an `async` producer actually overlaps work.
+All three schedules can be combined with all five valid clock/delay pairs. `profile_replay` requires `profile_id`. Chunk prediction length and execution length are separate, with execution length no larger than prediction length. Provide producer evidence for actual history offsets and overlap behavior; these are outside the contract checks.
 
-Each `clock_domains` key identifies an independent origin, with a `kind`, `process_id`, and `monotonic_origin`. Reuse of an ID means reuse of the same origin for the whole run; an episode reset must not reset that domain's timestamp. Cross-machine/process clocks need separate IDs unless an external alignment protocol establishes a shared origin. No duration is computed across domains.
+Each `clock_domains` key fixes a `kind`, `process_id` and `monotonic_origin` for the whole run, including episode resets. Use separate IDs across processes/machines unless an alignment protocol establishes a shared origin. Compute durations within a domain.
 
-`budget.clock_domain` selects the simulation or host domain, and `start_event` is explicitly `first_observation_sampled`. A producer must provide an observation timestamp in that domain to calculate elapsed budget time. The optional `host_watchdog` is separate and requires a host-monotonic domain. This validator checks declarations, not budget enforcement or clock synchronization.
+`budget.clock_domain` selects the simulation or host domain, and `start_event` is explicitly `first_observation_sampled`. A producer must provide an observation timestamp in that domain to calculate elapsed budget time. The optional `host_watchdog` is separate and requires a host-monotonic domain. The validator checks declarations. Budget enforcement is a runtime responsibility; clock alignment is required when sharing an origin across processes.
 
-Optional `metrics` describe a summary with `trials`, `successes`, `successful_task_time_mean_ns`, and `successful_chunk_count_mean`. Successes cannot exceed trials; when there are no successes both means must be null. Summary values are not recomputed from traces in this version. Passing their schema checks does not establish accurate experimental metrics.
+Optional `metrics` contain `trials`, `successes`, `successful_task_time_mean_ns` and `successful_chunk_count_mean`. Require successes ≤ trials and null means when successes=0. Compute these summaries from episode evidence before validation; this tool checks the supplied fields.
 
 ## Trace
 
@@ -52,7 +52,7 @@ schema_version, run_id, episode_id, event_seq,
 event_type, clock_domain, timestamp_ns
 ```
 
-`event_seq` increases strictly in serialized run order; gaps are allowed. Within each declared clock domain, timestamps do not go backwards. Timestamps in distinct domains can have unrelated values. Producers must serialize their records accordingly; this is not an unordered distributed-log merger.
+`event_seq` strictly increases in serialized run order, with gaps allowed. Timestamps are nondecreasing within each clock domain; origins may differ across domains. Producers supply this ordering.
 
 The validator checks these associations and lifecycle conditions:
 
@@ -66,8 +66,8 @@ The validator checks these associations and lifecycle conditions:
 
 Supported event types are `observation_sampled`, `inference_submitted`, `inference_started`, `inference_completed`, `result_released`, `action_started`, `action_finished`, `queue_underrun`, `result_dropped`, and `episode_finished`. Event-specific payloads are defined by the schema. Unknown properties are rejected to catch misspellings and silent semantic changes.
 
-`result_released.delay_ns` is a declared delay sample: total modeled delay for `profile_replay`, extra delay for `additive`, or target total for `target_total`. It is not an observed age or an automatically recomputed wait. `overshoot_ns` records the producer's overshoot and `profile_id` is null when no profile is configured. The validator checks their types and associations, not whether runtime timing implements those numbers. A no-injection mode should record a zero delay sample; mode-specific timing equations are deferred.
+`result_released.delay_ns` stores the declared delay: modeled total for `profile_replay`, extra delay for `additive`, target total for `target_total`, and zero for no injection. `overshoot_ns` records producer overshoot; `profile_id` is null without a profile. Validation covers types and associations; timing arithmetic belongs to the producer.
 
-Actual `observation_age` uses observation and `action_started` timestamps in the same domain. Actual boundary wait uses action start minus the preceding chunk boundary, including release gating. `inference_completed` does not substitute for `result_released` when injection postpones availability. These quantities are intentionally not filled from the paper's residual-delay formula.
+Actual `observation_age` uses observation and `action_started` timestamps in the same domain. Actual boundary wait uses action start minus the preceding chunk boundary, including release gating. `inference_completed` does not substitute for `result_released` when injection postpones availability. Compute these quantities from trace timestamps; report paper-model residual delay separately.
 
-This version does not validate physical dynamics, numerical model quality, clock alignment, injection arithmetic, real-time deadlines, queue capacity, single-flight scheduling, complete resource drain, or metric estimates. Those require future producer implementations and additional behavior tests. Contract extensions should include a version decision, example data and acceptance/rejection tests.
+Use producer/runtime tests to validate physical dynamics, model quality, clock alignment, injection arithmetic, deadlines, queue capacity, single-flight scheduling, resource drain and metric estimates. Schema extensions require a version decision, example data and acceptance/rejection tests.

@@ -1,6 +1,6 @@
 # 模型和数据资源准备
 
-[prepare_resources.py](prepare_resources.py) 为 `cosmos_libero`、`pi05_libero` 和 `cosmos_robocasa` 提供显式资源准备命令。实验入口仍按本地路径运行，并启用离线模式；缺少文件时会报错，不在推理或评测途中下载。
+[prepare_resources.py](prepare_resources.py) 为 `cosmos_libero`、`pi05_libero`、`cosmos_robocasa` 下载或复用资源并生成env配置，供离线评估使用。完整安装与首次运行见 [环境指南](../docs/environment_setup.md)。
 
 ## 默认下载位置
 
@@ -16,11 +16,11 @@
 
 `--root /data/robotics` 优先于环境变量 `ROBOTICS_RESOURCE_ROOT`，两者都未设置时使用 `~/.cache/robotics`。本工具显式传递 Hugging Face 的 `cache_dir`，所以 `HF_HOME` 不改变上表模型和数据集的下载位置。具体文件路径由下载结果返回并写入 env；[Hub 缓存与 local_dir 行为](https://huggingface.co/docs/huggingface_hub/guides/download) 由 `huggingface_hub` 管理。
 
-**LIBERO assets 是例外，不随 `--root` 移动。** 当前验证的 LIBERO wheel 在包内资产缺失时直接查找 `~/.cache/libero/assets`，忽略 YAML 中的 assets 路径。工具沿用这个目录，避免下载到了另一个位置却无法加载。原生包内已有 assets 时仍按该包的解析优先级使用。自定义 fork 的资产布局可继续使用 case 的手工路径配置。
+**LIBERO assets固定为 `~/.cache/libero/assets`。** 已验证wheel优先查包内资产，缺失时查该缓存并忽略YAML资产路径。自定义fork按case手工绑定布局。
 
 模型、下载缓存、数据和生成配置均不进入 Git。放在仓库内时，使用已忽略的 `.local/`、`artifacts/` 等目录。
 
-RoboCasa 使用 `--case cosmos_robocasa`，准备专用Policy checkpoint、统计量、T5和VAE，不下载LIBERO资产。`--robocasa-source` 绑定兼容fork，`--source` 仍是Cosmos源码；模型环境通过 `--python` 指定。生成的变量采用 `ROBOTICS_COSMOS_ROBOCASA_*`，避免误用LIBERO权重。厨房资产通过该fork的下载脚本单独准备，详见 [RoboCasa case说明](../benchmarks/static/cosmos_robocasa/README.md)。`--with-dataset` 对应 `nvidia/RoboCasa-Cosmos-Policy`，为可选训练/校准轨迹。
+RoboCasa使用 `--case cosmos_robocasa` 准备专用Policy、统计量、T5和VAE，变量前缀为 `ROBOTICS_COSMOS_ROBOCASA_*`。`--source` 指向Cosmos，`--robocasa-source` 指向模拟器fork，`--python` 选择解释器。厨房资产按 [case指南](../benchmarks/static/cosmos_robocasa/README.md) 单独下载；可选 `--with-dataset` 获取 `nvidia/RoboCasa-Cosmos-Policy`。
 
 ## 新机器准备命令
 
@@ -99,9 +99,9 @@ python tools/prepare_resources.py --case cosmos_libero \
   --env-file .local/cosmos-resources.env
 ```
 
-`--reuse NAME=PATH` 可以重复指定；未复用的资源才联网下载。VAE 复用目录必须含 `tokenizer/tokenizer.pth`。本地复用检查必需文件、非空内容与LFS占位状态，并记录 `origin=local`；该记录描述本地文件检查，远端版本与完整内容哈希由相应来源证据确认。π0.5 还会检查 processor JSON 引用的状态文件。需要离线准备时复用所有资源。
+重复 `--reuse NAME=PATH` 复用资源；全部复用可离线准备。VAE目录须含 `tokenizer/tokenizer.pth`；工具检查必需文件、非空/LFS状态及π0.5 processor引用，记录 `origin=local`。远端版本和完整哈希由来源证据确认。
 
-下载采用固定的 checkpoint/VAE 版本，保持与已有设置一致；`--revision NAME=COMMIT` 可显式覆盖。没有固定默认版本的资源在下载前解析为具体 commit，一次资源下载使用同一 commit，并记录文件数、字节数和版本。失败后可重跑同一命令，利用 Hub 缓存续传/复用；不会把缺文件、空文件、LFS pointer 或与远端大小不符的文件当作完成。
+checkpoint/VAE使用固定默认版本，可用 `--revision NAME=COMMIT` 覆盖；其余资源下载前解析为commit。记录版本、文件数和字节数，拒绝缺失、空文件、LFS pointer和大小不匹配。失败后重跑同一命令复用Hub缓存。
 
 若 Hub 要求权限，例如 PaliGemma，先在模型页面接受相应条款，再按 Hugging Face 官方流程登录。凭据由 Hub 客户端读取，不写入 env 或来源记录。离线模式变量 `HF_HUB_OFFLINE=1` 须在在线准备前取消。
 
@@ -109,4 +109,4 @@ python tools/prepare_resources.py --case cosmos_libero \
 
 ## Cosmos 的额外基础权重引用
 
-原生 Cosmos 注册训练配置时会解析 Video2World 基础模型引用，之后推理加载器才覆盖为 Policy checkpoint。本仓库在加载期间只将这一已知引用绑定到显式传入的 Policy 文件，退出时恢复原生解析函数；最终 `checkpoint.load_path` 和 VAE 路径必须与请求相符。`checkpoint-load.json` 记录绑定与实际加载审计，因此无需为这个未参与推理的基础引用额外下载权重或在源码树放置占位文件。
+加载时将已知Video2World基础引用绑定到显式Policy文件，退出时恢复解析器。核对最终 `checkpoint.load_path` 与VAE路径，并写入 `checkpoint-load.json`；无需额外下载该基础引用的权重。
