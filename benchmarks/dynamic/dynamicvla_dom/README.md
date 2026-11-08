@@ -1,44 +1,26 @@
 # Native DynamicVLA + DOM
 
-Single-environment Franka DOM evaluation with repository-owned DynamicVLA model,
-preprocessing, streaming queue and DOM scene/control source. Isaac Sim/Isaac Lab,
-PyTorch/LeRobot/Transformers, checkpoints and assets remain external dependencies.
-Execution uses the model and DOM source packaged in this repository.
+[Environment setup](../../../docs/environment_setup.en.md) · [Streaming walkthrough](../../../docs/hands-on.en.md#42-dynamicvla--dom-native-streaming)
 
-Choose `native-non-streaming` (default) or `native-streaming` (`--streaming`).
-Both run beside a continuously evolving simulator. Non-streaming retains the
-previous control target while generating the next chunk. Streaming generates
-in a worker, skips expired predicted actions and merges indexed action queues.
-This entry uses native model precision and the DOM timing protocol.
+Use this entry point to run DynamicVLA on a single Franka DOM scene. The model, preprocessing, streaming queue and scene/control code are maintained in this repository. Before starting, provide local paths to the PyTorch environment, Isaac SDK, checkpoint and scene assets.
+
+Choose between two native schedules. With `native-non-streaming` (the default), the simulator keeps the previous control target while the model generates the next chunk. With `--streaming`, a worker generates chunks and the client drops expired predictions or merges their remaining actions into the queue. In both modes, the model uses its native precision and the scene keeps advancing during inference.
 
 ## Environments and resources
 
-Use separate model and simulator environments. The upstream setup describes
-Python 3.10, PyTorch 2.7.1, Isaac Sim 4.5.0 and Isaac Lab 2.2.1. The local model
-environment used during integration is Python 3.11 with PyTorch 2.7.1 and
-Transformers 5.2.0. On a new machine, install the dependencies below and verify
-resource loading and a single episode before a larger evaluation.
+Create separate model and simulator environments. At integration, the upstream setup used Python 3.10, PyTorch 2.7.1, Isaac Sim 4.5.0 and Isaac Lab 2.2.1; the checked model environment used Python 3.11, PyTorch 2.7.1 and Transformers 5.2.0. Install the [model requirements](requirements-model.txt) in the model environment and the [simulator requirements](requirements-simulator.txt) in the compatible Isaac environment. Then run preflight and one episode before a larger batch.
 
-- Model dependencies: [requirements-model.txt](requirements-model.txt).
-- Simulator additions: [requirements-simulator.txt](requirements-simulator.txt);
-  install Isaac through its supported distribution first.
-- Checkpoint: local `config.json` and `model.safetensors` from the DOM policy.
-- Hugging Face cache: tokenizer and backbone configuration referenced by the
-  checkpoint must already exist. Execution sets `HF_HUB_OFFLINE=1` and
-  `TRANSFORMERS_OFFLINE=1`; it never downloads missing resources.
-- DOM test JSON, referenced USD scenes/textures and object assets are external.
-- Franka: an explicit local `panda_instanceable.usd` with its referenced USD and
-  material files. No automatic Nucleus robot asset fallback.
+Prepare:
 
-Copy [paths.env.example](paths.env.example) to an ignored local file, fill paths,
-and source it. `ROBOTICS_DOM_PYTHON` accepts Isaac's `python.sh`, an appropriate
-Python executable, or `isaaclab.sh` (the runner adds `-p`). Interpreter symlinks
-are preserved so virtual environments keep their identity. An unrelated parent
-Conda prefix is removed for Isaac shell launchers.
+- DOM checkpoint `config.json` and `model.safetensors`, plus its local Hugging Face tokenizer/backbone-config cache.
+- DOM test JSON, referenced USD scenes/textures, object assets and local Franka `panda_instanceable.usd` with material dependencies.
+- [paths.env.example](paths.env.example) with absolute paths. `ROBOTICS_DOM_PYTHON` accepts Isaac's `python.sh`, a Python executable or `isaaclab.sh` (adds `-p`). Preserve virtual-environment interpreter symlinks.
+
+Workers enforce `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` and use explicit Franka assets. Isaac launchers remove an unrelated parent Conda prefix.
 
 ## Launch
 
-From the repository root:
+From the repository root, source the completed env file and select idle GPUs:
 
 ```bash
 source .local/dynamicvla-dom.env
@@ -55,40 +37,17 @@ bash benchmarks/dynamic/dynamicvla_dom/run.sh \
   --output-dir runs/dynamic/dynamicvla_dom/streaming-001
 ```
 
-The dry run validates explicit local paths/configuration and prints commands; it
-neither starts CUDA/Isaac nor creates the output directory. Full asset dependency
-and environment compatibility are verified by real execution. Normal runs require
-clean idle selected GPUs, bind communication to localhost, preserve existing
-outputs and terminate their own child processes on errors. Use new output paths
-for retries. The model is loaded before the simulation handshake.
+Dry-run checks local paths and configuration without starting CUDA/Isaac or creating the output directory. The real run starts separate model and simulator processes on localhost. The model loads before the simulation handshake. Use a new output directory for each run. If startup or execution fails, check the client/server logs; the launcher stops its own child processes.
 
-`--rotation euler` is explicit by default: seven action coordinates do not identify
-whether their three rotational values are Euler angles or rotation vectors.
-`--num-steps` optionally overrides checkpoint refinement steps; chunk length,
-normalization and camera/state contract remain checkpoint-defined. The local DOM
-checkpoint uses two observations, 20 action steps and 10 refinement steps.
-Video recording defaults on; use `--no-record-video` to disable it. Ports can be
-changed using `--img-port` and `--act-port` for simultaneous independent runs.
+`--rotation euler` specifies how to interpret the rotational action values; `rotvec` and `quat` are explicit alternatives. Use `--num-steps` to change refinement steps while keeping the checkpoint's cameras, normalization and action horizon. The checked DOM checkpoint uses two observations, 20 action steps and 10 refinement steps. Video is on by default; add `--no-record-video` to disable it. Set `--img-port` and `--act-port` when running independent sessions.
 
 ## Native execution and time
 
-The initial adapter fixes native physics dt to 0.04 s and control decimation to1.
-Camera periods and the native task success/timeout terms come from the DOM test
-configuration. Waiting for model results never pauses the scene. Simulator wall
-pacing and model `dt_scale` compensation remain enabled; their actual values are
-recorded alongside separate simulation and wall clocks.
+The physics timestep is 0.04 s and control decimation is 1. Camera cadence, success checks and timeout come from the DOM test configuration. The native wall pacing and model `dt_scale` compensation remain enabled. Both simulation and wall timestamps are recorded, so you can inspect how the scene progresses while inference is running.
 
-Each observation includes its episode, index, instruction and simulation/wall
-clocks. Actions echo their source identity. Terminal/ACK messages are retained;
-a reset cannot consume an earlier episode's pending inference. Worker errors or
-missing actions are execution errors, not policy failures. Episode seeds are
-`seed + episode_id`; model sampling uses a seeded continuous per-run RNG.
+Observations carry episode/index/instruction/clocks; actions echo their source. Terminal/ACK handshakes prevent pending results crossing a reset. Worker errors or missing actions are execution errors. Episode seeds are `seed + episode_id`; model sampling uses a continuous seeded run RNG.
 
-As upstream, non-streaming skips its first three observations before inference;
-streaming additionally performs a worker startup warmup. Warmup chunks are excluded
-from episode generation counts. Native streaming may discard a completed chunk
-or execute only its tail: this is why control steps, sent actions and generated
-chunks are counted separately.
+Non-streaming skips its first three observations; streaming adds startup warmup. Warmup is excluded from generation counts. A completed chunk may be discarded or used only at its tail, so generation, applied chunks, sent actions and control steps are separate counts.
 
 ## Output
 
@@ -106,40 +65,16 @@ chunks are counted separately.
 | `episode-*.mp4` | Native pre-action camera frames; playback 24fps, distinct from25Hz control |
 | `summary.json`, `summary.md`, `coverage.json` | Completed-episode statistics and coverage |
 
-Success rate includes successful and failed task episodes; overall control-step
-statistics penalize failures at the declared budget. Mean generated chunks is
-conditioned on success and undefined at zero successes. Counts come from model
-generation events. Applied chunks count unique generated chunks actually used
-by the simulator, including tails.
+Start with `summary.md` for success rate, control steps and chunk counts, then inspect the episode and request logs for individual runs. Success rate includes all valid task episodes. Overall step statistics charge failures their declared budget; the successful mean is null when no episode succeeds. Generated chunks are counted from model events, while applied chunks count unique predictions actually used by the simulator, including partial tails.
 
-`model_host_duration_s` records the host-side model call span without explicit
-CUDA synchronization. Client action selection includes cache pops, queue access
-and pacing. Use these fields to inspect execution; complete-policy GPU latency
-requires a synchronized benchmark, and task duration uses the simulation clock.
+`model_host_duration_s` measures the host-side model call. Client action selection also includes queue/cache access and pacing. For a GPU latency comparison, measure a complete policy call in a separate synchronized benchmark; use simulation timestamps for task duration.
 
 ## Source and distribution
 
-[Model provenance](../../../src/robotics_bench/models/dynamicvla/PROVENANCE.json)
-and [DOM provenance](../../../src/robotics_bench/dynamicvla_dom/native/PROVENANCE.json)
-record the selected local DynamicVLA revision, original file hashes and migration
-changes, including the local compatibility fixes in this source snapshot.
-Derived files retain S-Lab's non-commercial license; the Franka configuration
-retains its Isaac Lab BSD notice.
-See [third-party notices](../../../THIRD_PARTY_NOTICES.md). Model and asset terms
-remain separate and their files are not distributed in this repository.
+[Model](../../../src/robotics_bench/models/dynamicvla/PROVENANCE.json) and [DOM](../../../src/robotics_bench/dynamicvla_dom/native/PROVENANCE.json) provenance retain revisions, file hashes and local compatibility changes. Derived source retains **S-Lab non-commercial terms**; Franka configuration retains the Isaac Lab BSD notice. SDK, models and assets are external resources with separate terms; see [third-party notices](../../../THIRD_PARTY_NOTICES.md).
 
 ## Validation scope
 
-The integration was checked on RTX 6000 Ada GPUs with the local DOM checkpoint:
-fixed-input non-streaming output matched the local source implementation exactly;
-one native non-streaming episode and two consecutive native streaming episodes
-completed with MP4, control ledgers and generation/applied-chunk cross-checks.
-This evidence covers fixed-input equivalence and three integration episodes.
-Task-suite quality and performance comparisons require their own declared task
-and seed sets. Built wheels were checked for owned source and retained licenses;
-public CI runs CPU contract/lifecycle tests with local synthetic fixtures.
+On RTX 6000 Ada, fixed-input non-streaming actions matched the local source exactly. One non-streaming and two consecutive streaming episodes completed with MP4, controls and generation/applied-chunk checks. These three episodes cover integration; evaluate a declared task/seed set for task quality or performance comparisons. Wheel source/licenses and CPU contract/lifecycle checks were also verified.
 
-The validated local simulator uses Python 3.10.15, Isaac Lab distribution version
-0.45.9 and Torch 2.7.0+cu128 with the installed Isaac Sim4.5 runtime. This differs
-from the upstream recommended environment; `effective-config.json` records the
-actually detected versions, leaving unavailable distribution metadata null.
+The checked simulator used Python 3.10.15, Isaac Lab distribution 0.45.9, Torch 2.7.0+cu128 and Isaac Sim 4.5. `effective-config.json` records detected versions, with unavailable metadata set to null.

@@ -1,8 +1,8 @@
 # 模拟器源码修改、版本与协作
 
-本协议适用于 LIBERO、RoboCasa、RoboTwin、Kinetix、DOM 等第三方仿真环境。KINETIX/Jax2D的运行源码已按MIT许可迁入仓内私有包，来源见对应PROVENANCE；其余模拟器沿用显式外部源码，下面的fork/submodule目录仍是接入约定，不表示已创建远端fork。各后端的引擎、环境隔离与执行方式见 [多模拟器后端协议](simulator-backends.md)。
+需要修改模拟器内部代码时，本页说明改动放在哪里、如何固定版本，以及怎样随主仓发布。KINETIX/Jax2D 已按 MIT 许可维护仓内副本，DOM 执行源码也在本仓；Isaac SDK 和资产独立安装。来源见各模块 PROVENANCE 及 [第三方记录](../../THIRD_PARTY_NOTICES.md)。下文 fork/submodule 目录是扩展设计，现有环境见 [后端指南](simulator-backends.md)。
 
-建议先使用公开 API、adapter 或受支持的扩展；确实需要持续修改且许可允许分发的源码时，维护独立 fork，主仓以 submodule 固定提交。SDK、引擎与大型资产按其支持的方式独立安装。调度、实验和展示仍在主仓维护。
+先检查公开 API 或 adapter 能否满足需求。确实需要持续修改内部源码且许可允许时，再维护 fork 并用 submodule 固定提交。SDK、引擎和资产按上游方式安装；调度、实验与展示代码留在主仓。
 
 ## 先判断改哪一层
 
@@ -30,7 +30,7 @@ LIBERO 的 wrapper 传入 control_freq，并将 step 委托内部环境；其 BD
 
 fork 与主仓保留独立历史，方便核查差异和回收上游修复。submodule 在主仓保存指定提交，普通 update 按这个提交检出；环境安装/实验运行不使用 `--remote` 自动追踪最新分支。[Git submodule 文档](https://git-scm.com/book/en/v2/Git-Tools-Submodules)
 
-不要同时手改 submodule 再叠加另一套未记录的补丁。也不要靠安装脚本 sed 修改 site-packages 或全局 monkey patch 承载正式实验语义，否则无法可靠定位真正运行的源码。
+正式实验语义使用可追踪的源码提交或明确补丁链；禁止叠加未记录的 submodule 修改、site-packages 替换或全局 monkey patch。
 
 ## 建议目录与版本来源
 
@@ -47,9 +47,9 @@ robotics/
 └── docs/third_party/libero.md          # 改动目录、原因、上游/下游 PR
 ```
 
-实际 fork 提交以主仓 gitlink 为准；lock 文件记录 upstream URL/base SHA、robosuite/MuJoCo 版本、环境约束和资产 hash，避免独立维护两个可能冲突的 fork SHA。实验运行时导出实际 gitlink/工作树 dirty 状态、import 来源及依赖版本到 artifact；正式发布不依赖未提交的本地修改。
+fork 提交以 gitlink 为准；lock 记录 upstream URL/base SHA、依赖版本、环境约束和资产 hash。运行产物保存 gitlink/dirty 状态、import 来源及依赖版本；发布内容必须来自已提交版本。
 
-当前 v1 manifest 尚未包含完整 simulator provenance。添加上述运行元数据时先走 [契约演进](artifacts.md)，不能将未定义字段直接塞进严格 schema。
+通用 v1 的 simulator provenance 扩展按 [契约演进](artifacts.md)增加字段与校验。
 
 开源 `.gitmodules` 使用所有读者可访问的公开 HTTPS 地址，开发者可在本机另设推送凭据。普通 CPU 契约任务仍不需要初始化模拟器；只有 simulator 任务运行相应依赖初始化/安装。大型数据和权重不作为 submodule 内容引入。
 
@@ -61,20 +61,20 @@ robotics/
 4. 主仓 reviewer 必须查看模拟器 diff 或关联 PR，不能只批准一个 opaque SHA。两边验收通过后合并主仓。
 5. 通用改进可另向原上游提 PR；主仓无需等待上游接受，但应保留后续去掉下游修改的路径。
 
-主仓引用的提交必须在公开 fork 可获取且有持久分支/tag 保留，不能是学生机器上未推送的 commit，或仅存在于可能被清理的临时 PR ref。学生修改 submodule 前应创建分支，避免在 detached HEAD 上留下不可追踪提交。
+主仓引用的提交必须已推送到公开 fork，并由长期保留的分支或 tag 指向。修改 submodule 前先建分支，提交完成后再更新主仓引用。
 
-CODEOWNERS 分两处配置：主仓审查 adapter 与 gitlink，fork 审查 simulator 源码。主仓的 owner 规则不自动覆盖 fork 内部文件。初期由一位维护者负责模拟器集成，学生按模块贡献，不要求每位新成员管理跨仓发布。
+主仓 CODEOWNERS 覆盖 adapter/gitlink，fork 规则覆盖模拟器源码。维护者负责跨仓集成与发布，贡献者按模块提交。
 
 ## 验收与实验标识
 
 为修改前的受支持路径保留兼容测试：固定 seed/state/action 序列，比较 step 数、观测、终止及数值容差。新 hook 默认关闭时应保持原行为；新的动态协议单独测试时间推进、控制保持、末次动作/终止及 reset。
 
-如果只是观测钩子或可选参数扩展，验证其关闭时不改变基线。若改变对象运动、成功判据、控制频率或物理参数，应给新 task/protocol ID，例如 `libero_latency_v1`，同时记录原任务来源；不能把修改后的结果无说明地标为官方 LIBERO 分数。
+观测钩子或可选参数关闭时保持基线；对象运动、成功判据、控制频率或物理参数变化时，使用新 task/protocol ID（如 `libero_latency_v1`），并记录原任务来源。
 
-模拟器测试需要对应环境，可以不依赖大模型；必要的渲染/物理依赖单列。普通 CPU 契约 CI 继续保持轻量；修改 gitlink 或 simulator adapter 时，相关集成证据由指定 job/设备补齐。没有环境证据时标未验证，不扩大支持矩阵。
+模拟器测试使用对应渲染/物理环境，可由轻量 policy 驱动。CPU 契约 CI 独立运行；gitlink/adapter 变更的集成证据由指定 job/设备提供，未执行的组合标为未验证。
 
 ## 发布时一起交付什么
 
-一次发布固定主仓 commit、模拟器 fork commit、上游基线、依赖/资产版本和测试配置。提供能够取回 submodule 的克隆/安装说明；不要假设主仓源码 ZIP 含有 submodule 源文件。如需离线包，另构建完整源码包并检查所有来源与许可。
+发布固定主仓/fork commit、上游基线、依赖/资产与测试配置，并提供 submodule 克隆说明。主仓 ZIP 与含 submodule 的完整离线源码包分别构建；离线包检查全部来源与许可。
 
 保留实际引入文件的版权、许可证和修改记录；数据/资产另核对各自条款。发布说明提供模拟器改动摘要与关联 PR，使用户能选择原版基线或扩展协议。相关来源统一登记 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)。

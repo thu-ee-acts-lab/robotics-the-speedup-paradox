@@ -10,7 +10,7 @@
 
 [Paper PDF](https://arxiv.org/pdf/2606.28529) · [Citation](#citation) · [Environment setup](docs/environment_setup.en.md) · [Hands-on](docs/hands-on.en.md) · [§4.5 predictor](docs/kinetix-latency-study.en.md) · [Contributing](CONTRIBUTING.md)
 
-Connect inference optimization to task-level outcomes. This repository provides model engines, low-precision operators and closed-loop evaluation for the paper above. Compare quantization, asynchronous execution and sampling steps on matched tasks, then measure their effects on inference latency, success rate and action count.
+Run embodied policies in simulation and compare inference optimizations. The project includes model engines, low-precision operators and experiment scripts for the paper above. Keep the model and task fixed, then compare how quantization, asynchronous execution and sampling steps affect inference time, task success and action count.
 
 Start with a supported case below, prepare its model and simulator environment, and run a baseline plus the optimization you want to evaluate. Each guide links the required resources, commands and validation records. [Licensing and source provenance](THIRD_PARTY_NOTICES.md) are tracked separately.
 
@@ -44,7 +44,7 @@ The implementation separates four parts of an experiment:
 
 ## Supported models and tasks
 
-Models, checkpoints, tasks and simulators are bound into **cases**. Each combination below has its own entry point and environment.
+Each **case** pairs a model with a task environment and provides its own launcher and setup instructions. Choose one of the combinations below.
 
 | Type | Case / run guide | Current implementation |
 | --- | --- | --- |

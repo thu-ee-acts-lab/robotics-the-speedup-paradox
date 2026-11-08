@@ -67,7 +67,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --output-dir "$ROBOTICS_RUN/cosmos-preflight" --dry-run
 ```
 
-Expected checkpoint: the command prints a validated plan and creates no run directory. The next command loads the model and runs the simulator.
+The preflight should print a valid plan without creating the output directory. The next command loads the model and runs the simulator.
 
 **Step 2 — run the paired pilot.** This evaluates five configurations on two initial states: 10 episodes in total. T0 uses W8A8 at all 280 candidate Linear sites; T5 uses W4A4 at 46 sites; T10 uses W4A4 at all 280. All use five sampling steps and 16 executed actions per chunk.
 

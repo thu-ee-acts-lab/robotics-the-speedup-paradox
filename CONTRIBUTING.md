@@ -1,12 +1,12 @@
 # 贡献指南 / Contributing
 
-本仓采用主题分支 → 提交 → PR → 审核 → merge commit 的协作流程，沿用VLM项目的中英文提交与PR说明方式。任何进入 `main` 的代码、配置和文档变更都通过PR；维护者负责最终合并。
+代码、配置和文档都在主题分支上修改，再通过 PR 合入 `main`。提交说明和 PR 使用中英文；维护者审核后，默认以 merge commit 合并。
 
 Use topic branches and pull requests for code, configuration and documentation changes. Commit titles and PR descriptions use Chinese and English. Maintainers review and merge through PR merge commits.
 
 ## 1. 明确范围 / Define the change
 
-一个PR解决一个可独立审阅的问题，注明 `static/<case>`、`dynamic/<case>` 或 `shared`。小改动可以直接在PR中说明；较大功能、跨仓依赖或多人协作使用 [任务表单](.github/ISSUE_TEMPLATE/task.yml) 记录范围和验收，未确定的owner/reviewer写“待认领”。
+一个 PR 解决一个问题，并注明对应的 `static/<case>`、`dynamic/<case>` 或 `shared`。小改动直接在 PR 中说明；跨模块或多人任务使用 [任务表单](.github/ISSUE_TEMPLATE/task.yml)，写明负责人、依赖和完成标准。未确定的负责人或审阅人标记为“待认领”。
 
 Keep each PR focused on one reviewable problem and name its case or shared scope. Small changes can explain scope directly in the PR; larger work can use an Issue. Do not commit a separate planning document for every task.
 
@@ -24,11 +24,11 @@ git commit -m "docs: 完善环境说明 / clarify environment setup"
 git push -u origin HEAD
 ```
 
-提交标题使用 `type: 中文摘要 / English summary`，可加scope，例如 `fix(robocasa): 修复初态读取 / fix initial-state loading`。一个提交应完成一个逻辑变化；不要求逐行或每次对话都创建提交。不批量改写历史提交以套用新格式。
+提交标题使用 `type: 中文摘要 / English summary`，可加scope，如 `fix(robocasa): 修复初态读取 / fix initial-state loading`。按逻辑变化提交，保留已有历史。
 
 Start from current `origin/main` unless a dependency branch is explicitly required. Use focused commits with bilingual titles. Review the diff before staging; list the intended files rather than staging unrelated work.
 
-**有依赖的PR：** 如果本次改动依赖尚未合并的功能，声明前置分支/PR，并以它为当前PR的base。前置PR合并后，再把base调整到 `main` 并复核diff。不要把已有整套实验实现藏进一个标题为“文档更新”的PR。引入此制度前的本地功能提交可作为明确的前置PR提交审查，不需要重写历史。
+**依赖PR：** 以前置分支为base并注明依赖；前置PR合并后调整base到 `main`，复核diff。功能实现与文档更新分别按实际范围命名。
 
 For stacked work, explicitly name the prerequisite branch/PR and use it as the base. After the prerequisite merges, retarget to `main` and review the resulting diff. Existing local feature commits remain separate from a documentation-only review.
 
@@ -43,7 +43,7 @@ For stacked work, explicitly name the prerequisite branch/PR and use it as the b
 | 验证 / Validation | 实际命令、结果、未验证范围 / Commands, observed results and unverified scope |
 | 影响与回退 / Impact and rollback | 兼容性、数值或协议影响，以及回退方式 / Compatibility, numerical or protocol impact and rollback |
 
-小改动每节每种语言一句话即可。PR标题采用与提交相同的中英文格式。尚未完成验收时创建Draft；准备好后提交review。避免把会话记录、模型输出或大型报告粘进正文，只保留审阅所需的事实和证据位置。
+每节提供中英文，小改动各一句即可。验收期间使用Draft，完成后请求review。正文保留改动事实、验证结果和证据位置。
 
 Use the four bilingual sections and a bilingual PR title. Keep small changes concise. Open a draft while work is incomplete; report checks that were not run explicitly.
 
@@ -58,13 +58,13 @@ gh pr create --draft --base main \
   --body-file .local/pr-body.md
 ```
 
-CI和后续审核针对PR中的实际commit；推送修复后更新验证说明。服务器认证不可用时，保留已推送分支、准确的base和PR正文，并明确说明PR尚未创建，不能将本地提交称为已提交PR。
+推送修复后更新验证说明，CI与审阅均对应当前commit。认证受阻时保留分支、base和PR正文，并报告实际提交状态。
 
 ### 文档写作 / Documentation writing
 
-参考 [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill) 的叙事原则：先说明读者能解决的问题和可用能力，再给出命令、配置条件与验证证据。首页用于导航，case指南用于运行，协议文档集中定义精度、时间与统计口径。将重复提醒改为具体条件，阶段过程记录留在本地产物或PR交接中。保留影响使用判断的兼容性、实测结果和许可信息；中英文入口同步维护。
+文档写给第一次使用项目的人：先说明工具能做什么，再给安装和运行命令，最后解释输出及常见错误。一个概念解释一次，其他页面用链接引用。中英文同步更新，准确保留支持范围、实测结果和许可信息。写作参考 [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill)。
 
-Follow the narrative principles in [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill): lead with the problem and available capabilities, then provide commands, configuration conditions and evidence. Use the homepage for navigation, case guides for execution and protocols for precision, time and metric definitions. Replace repeated warnings with concrete conditions and keep progress logs in local artifacts or PR handoffs. Preserve compatibility requirements, measured results and licensing information that affect use; maintain both language entry points together.
+Write for someone using the project for the first time: explain what the tool does, give installation and run commands, then explain outputs and common errors. Explain each concept once and link to it elsewhere. Keep both languages current and preserve supported configurations, measurements and licensing. See [anti-defensive-writing](https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill) for writing guidance.
 
 ## 4. 与改动相称的验证 / Proportionate validation
 
@@ -75,7 +75,7 @@ Follow the narrative principles in [anti-defensive-writing](https://github.com/A
 | 模型/控制协议 | 相关CPU检查与实际GPU闭环；记录初态、预算、成功和异常 / CPU checks plus scoped real execution |
 | 数值/性能优化 | 匹配的baseline、输入、精度和设备；正确性及完整入口测量 / Matched baseline, correctness and complete-entry measurements |
 
-不为文字修改增加测试，不为低影响改动堆积实现镜像测试。已有检查通过后，仅在出现新改动、失败或明确风险时扩大验证。合成数据、单算子结果和单回合smoke各自标明范围。
+文字修改检查文档即可；行为测试覆盖实际边界。检查通过后按新改动或失败追加验证，标明合成、单算子或单回合证据范围。
 
 For behavior changes, run from the repository root:
 
@@ -91,13 +91,13 @@ python -m compileall -q tools benchmarks src
 
 ## 5. 审核与合并 / Review and merge
 
-reviewer核对目的、diff、兼容性和实际证据。本仓保留非作者审阅要求；审核角色须真实存在，不用AI自评代替他人批准。维护者在相关检查通过、讨论解决后，通过PR的 **Create a merge commit** 合并，保留提交与PR的关联；有理由采用其他合并策略时在PR中说明。
+由真实的非作者reviewer核对范围、diff、兼容性和证据；AI自评不代替批准。检查通过且讨论解决后，维护者使用 **Create a merge commit** 合并；其他合并策略在PR注明。
 
 A reviewer other than the author checks scope, behavior, compatibility and evidence. Maintainers merge after relevant checks and discussions are resolved. The default is **Create a merge commit**. Explain any different merge strategy in the PR.
 
 不直接提交或推送到 `main`，不通过本地merge后直接push绕开PR，也不自动启用auto-merge。用户已经明确授权某个PR合并时，代理可在规则满足后执行，不重复请求同一授权；普通开发任务不代表已授权合并。
 
-本地规则与模板不能代替GitHub服务端限制。保护 `main`、要求 `CPU contracts` 状态及审查、禁止force push等设置由维护者在服务端核对，见 [.github说明](.github/COLLABORATION.md)。不能声称未检查的远端规则已启用。
+维护者按 [.github说明](.github/COLLABORATION.md) 核对服务端保护：`main`、`CPU contracts`、审查要求及force push限制。只报告实际确认的设置。
 
 ## 6. 文件与依赖边界 / Tracked files and dependencies
 

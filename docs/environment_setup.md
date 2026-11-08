@@ -28,7 +28,7 @@ python3.11 -m venv .local/envs/analysis
 export KINETIX_ANALYSIS_PYTHON="$ROBOTICS_REPO/.local/envs/analysis/bin/python"
 ```
 
-**检查点：** 契约检查打印 `VALID`，加速比示例输出合成对照表。这两个环境提供NumPy/SciPy和CPU工具，分析环境额外安装Matplotlib；模型运行栈分别配置。
+**运行后应看到：** 契约检查打印 `VALID`，加速比示例输出合成对照表。这两个环境提供NumPy/SciPy和CPU工具，分析环境额外安装Matplotlib；模型运行栈分别配置。
 
 <a id="2-为每个case配置独立gpu环境"></a>
 ## 2. 选择运行环境
@@ -86,7 +86,7 @@ export ROBOTICS_KINETIX_PYTHON="$ROBOTICS_REPO/.local/envs/kinetix/bin/python"
 CUDA_VISIBLE_DEVICES="$ROBOTICS_GPU" "$ROBOTICS_KINETIX_PYTHON" -c 'import jax; print(jax.__version__); print(jax.devices()); assert any(d.platform == "gpu" for d in jax.devices())'
 ```
 
-**检查点：** 导入检查列出GPU设备。如果仅出现CPU，先解决驱动/CUDA插件配置，再开始GPU实验。
+**运行后应看到：** 导入检查列出GPU设备。如果仅出现CPU，先解决驱动/CUDA插件配置，再开始GPU实验。
 
 ### 准备checkpoint
 
@@ -128,7 +128,7 @@ bash benchmarks/dynamic/kinetix/run.sh \
   --output-dir runs/dynamic/kinetix/setup-001
 ```
 
-**检查点：** dry-run打印计划且不创建 `setup-001`；实际运行生成 `case-manifest.json`、`episodes.jsonl`、`requests.jsonl` 和 `summary.md`。`--validate-native` 检查原生端点一致性。随后进入 [§4.5预测器教程](kinetix-latency-study.md)，为质量基线选择新的输出目录。
+**运行后应看到：** dry-run打印计划且不创建 `setup-001`；实际运行生成 `case-manifest.json`、`episodes.jsonl`、`requests.jsonl` 和 `summary.md`。`--validate-native` 检查原生端点一致性。随后进入 [§4.5预测器教程](kinetix-latency-study.md)，为质量基线选择新的输出目录。
 
 ## 4. Cosmos：模型栈与模拟器资产
 
@@ -179,7 +179,7 @@ uv pip install --python "$COSMOS_PYTHON" \
 cd "$ROBOTICS_REPO"
 ```
 
-**检查点：** Torch报告CUDA可用。下一节LIBERO使用 `COSMOS_CASE=libero`；RoboCasa重新执行上述安装步骤并选择 `COSMOS_CASE=robocasa`，两者的 `UV_PROJECT_ENVIRONMENT` 目录分开。仓内模型使用上游loader和框架依赖，预检会核对所选源码接口。
+**运行后应看到：** Torch报告CUDA可用。下一节LIBERO使用 `COSMOS_CASE=libero`；RoboCasa重新执行上述安装步骤并选择 `COSMOS_CASE=robocasa`，两者的 `UV_PROJECT_ENVIRONMENT` 目录分开。仓内模型使用上游loader和框架依赖，预检会核对所选源码接口。
 
 ### LIBERO资源与首次运行
 
@@ -203,7 +203,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --output-dir runs/static/cosmos_libero/setup-001
 ```
 
-**检查点：** 单回合写出完成manifest和汇总。资源工具准备policy、归一化统计、文本embedding、VAE和模拟器资产，并将选定的解释器/源码路径写入 `.local/cosmos-libero.env`。静态精度与异步对照见 [实验上手指南](hands-on.md)。
+**运行后应看到：** 单回合写出完成manifest和汇总。资源工具准备policy、归一化统计、文本embedding、VAE和模拟器资产，并将选定的解释器/源码路径写入 `.local/cosmos-libero.env`。静态精度与异步对照见 [实验上手指南](hands-on.md)。
 
 ### RoboCasa资源与首次运行
 
@@ -231,7 +231,7 @@ bash benchmarks/static/cosmos_robocasa/run.sh \
   --output-dir runs/static/cosmos_robocasa/setup-001
 ```
 
-**检查点：** 场景初始化成功，`initializations/` 含状态/XML信息，并生成回合汇总。控制器配置来自Cosmos源码。一个进程运行一个case，checkpoint、三相机输入和归一化统计按case绑定。
+**运行后应看到：** 场景初始化成功，`initializations/` 含状态/XML信息，并生成回合汇总。控制器配置来自Cosmos源码。一个进程运行一个case，checkpoint、三相机输入和归一化统计按case绑定。
 
 <a id="4-绑定运行路径"></a>
 ## 5. 绑定其他模型／模拟器栈
@@ -255,7 +255,7 @@ bash benchmarks/static/pi05_libero/run.sh \
   --output-dir runs/static/pi05_libero/setup-001 --dry-run
 ```
 
-**检查点：** dry-run接受evaluator接口、LIBERO任务文件及模型/processor配置。去掉 `--dry-run`、添加 `--gpu 0` 运行单回合。已有checkpoint/tokenizer时直接填写 [paths.env.example](../benchmarks/static/pi05_libero/paths.env.example) 即可。
+**运行后应看到：** dry-run接受evaluator接口、LIBERO任务文件及模型/processor配置。去掉 `--dry-run`、添加 `--gpu 0` 运行单回合。已有checkpoint/tokenizer时直接填写 [paths.env.example](../benchmarks/static/pi05_libero/paths.env.example) 即可。
 
 ### LingBot＋RoboTwin
 
@@ -273,7 +273,7 @@ bash benchmarks/static/lingbot_robotwin/run.sh \
   --output-dir runs/static/lingbot_robotwin/setup-001 --dry-run
 ```
 
-**检查点：** 两个导入检查通过，dry-run解析出任务与资源文件。去掉 `--dry-run`、添加 `--gpu 0` 运行单回合。[case指南](../benchmarks/static/lingbot_robotwin/README.md) 说明模型worker、缓存协议和任务种子筛选。
+**运行后应看到：** 两个导入检查通过，dry-run解析出任务与资源文件。去掉 `--dry-run`、添加 `--gpu 0` 运行单回合。[case指南](../benchmarks/static/lingbot_robotwin/README.md) 说明模型worker、缓存协议和任务种子筛选。
 
 <a id="dynamicvladom"></a>
 ### DynamicVLA＋DOM
@@ -296,7 +296,7 @@ bash benchmarks/dynamic/dynamicvla_dom/run.sh \
   --output-dir runs/dynamic/dynamicvla_dom/setup-001 --dry-run
 ```
 
-将 `ROBOTICS_DYNAMICVLA_PYTHON` 设为新模型环境 `bin/python` 的绝对路径，并填写其余六项。**检查点：** 预检打印两个进程的命令；去掉 `--dry-run` 后在指定空闲GPU启动模型与模拟器，写出 `client.log`、`server.log`、`summary.md` 和MP4。用 `--no-record-video` 关闭视频。
+将 `ROBOTICS_DYNAMICVLA_PYTHON` 设为新模型环境 `bin/python` 的绝对路径，并填写其余六项。**运行后应看到：** 预检打印两个进程的命令；去掉 `--dry-run` 后在指定空闲GPU启动模型与模拟器，写出 `client.log`、`server.log`、`summary.md` 和MP4。用 `--no-record-video` 关闭视频。
 
 <a id="3-准备模型任务与资产"></a>
 ## 6. 资源位置与输出文件

@@ -1,18 +1,18 @@
 # 模型与模拟器接入协议
 
-本协议定义首版接入的责任与交付物，不要求先跑完整论文实验。π0.5＋LIBERO已有 [外部源码试跑桥接](../../benchmarks/static/pi05_libero/README.md)，支持同步与论文静态抽象 `paper_async`；其余模型后端按实际接入创建。真实并发可独立扩展，不是论文异步接入的前提。
+接入新模型或模拟器时，本页帮助你划分模型、runner 和环境各自负责的工作，并确定需要的测试。运行已有 case 请看 [操作指南](../hands-on.md)。静态 `paper_async` 使用历史观测；真实并发有独立的调度约定。
 
-接入以具体实验case为单位，静态任务与动态任务分别维护入口、控制协议和baseline，见 [架构边界](../architecture.md)。case绑定模型、checkpoint、processor、任务和模拟器；新增Engine或SimulatorAdapter不自动扩展其他case的支持范围。组合是否可用须检查任务匹配权重、观测/动作语义、控制周期及协议能力，不能只检查数组形状。
+每个 case 指定模型、checkpoint、processor、任务和模拟器。接入时同时检查权重、观测/动作含义、控制周期和所需协议；静态与动态 case 各自维护入口和 baseline，见 [架构指南](../architecture.md)。
 
 ## 所有 adapter 共享的要求
 
-公共约定是输入来源、状态生命周期、动作语义和时间域。VLA每次推理消费带observation/episode ID的不可变快照，输出带request/observation来源、单位、执行间隔和有效区间的action chunk。Kinetix等原生RL路径保留参数/carry/PRNG与观测PyTree，输出原生动作分布或所选动作，关联相同含义的来源事件；无需伪造文本输入、机械臂状态或固定长度chunk。
+公共约定是输入来源、状态生命周期、动作语义和时间域。VLA 每次推理消费带 observation/episode ID 的不可变快照，输出带 request/observation 来源、单位、执行间隔和有效区间的 action chunk。Kinetix 等原生 RL 路径保留参数/carry/PRNG 与观测 PyTree，输出原生动作分布或所选动作，关联相同含义的来源事件；无需伪造文本输入、机械臂状态或固定长度 chunk。
 
-模型可以内部同步实现，也可以位于编译后的rollout中；完成句柄不是所有后端必需的调用形式。动作就绪必须对应输出真正可消费，不能把设备enqueue返回当作完成。原生批量路径可以先在设备数组中记录模拟事件再批量导出，不为每步强制创建host请求或虚构墙钟时间。
+模型可以同步调用，也可以放在编译后的 rollout 中。“动作就绪”表示调用方已经能读取输出，因此设备 enqueue 和完成要分别记录。批量执行可先在设备数组中记录事件，再导出实际时钟域和发生时刻。
 
-adapter 提供 reset 行为，声明历史状态、cache、随机流和输出 buffer 生命周期。reset 的完成确认、跨任务 cache scope 和加载模式遵循 [后端状态协议](backend-state.md)。VLA的action horizon、实际执行动作数、denoise/refinement steps、cache chunk数分别记录；原生RL按自身动作和状态定义字段，不编造不适用的去噪/chunk参数。配置序列化为resolved manifest；公开选项必须真正进入调用路径，新增元数据先遵循契约演进流程。
+adapter 提供 reset 行为，声明历史状态、cache、随机流和输出 buffer 生命周期。reset 的完成确认、跨任务 cache scope 和加载模式遵循 [后端状态协议](backend-state.md)。VLA 的 action horizon、实际执行动作数、denoise/refinement steps、cache chunk 数分别记录；原生 RL 按自身动作和状态定义字段，不编造不适用的去噪/chunk 参数。配置序列化为 resolved manifest；公开选项必须真正进入调用路径，新增元数据先遵循契约演进流程。
 
-静态实验默认覆盖模型计时与静态场景闭环指标。先用固定观测 fixture 做 action 对齐即可提交基础接入，完整 rollout 与优化实验作为后续 PR。没有 GPU 的成员可以完成配置、shape、错误路径与 trace 契约工作。
+建议先对齐固定输入的动作输出，再跑通单回合闭环，最后比较优化配置。配置、shape、错误路径和 trace 格式可在 CPU 上检查；模型计时和任务质量在对应 GPU 环境中评估。
 
 ## 首版方向
 
@@ -24,34 +24,34 @@ adapter 提供 reset 行为，声明历史状态、cache、随机流和输出 bu
 | VLA动态仿真 | 模型侧只消费快照并返回动作 | 世界在等待中推进、延迟采样、旧动作/hold规则、terminal | CPU scripted policy验证运动和延迟；之后接DOM等匹配环境 |
 | Kinetix原生RL | 任务匹配Flax网络、参数PyTree、动作分布、可选carry与PRNG | 原生JAX环境/rollout、延迟状态与按环境终止 | 固定关卡/参数动作对齐、真实policy动作被环境消费、reset与时间线，见 [专用入口](../../benchmarks/dynamic/kinetix/README.md) |
 
-Cosmos-Policy 和 LingBot-VA 的机器人适配器属于本仓库；后续其他研究项目的实现不因模型类别相同而自动纳入公开范围。
+Cosmos-Policy 和 LingBot-VA 机器人适配器由本仓维护；新增来源按模块记录许可与移植范围。
 
 ## 量化与融合接口
 
-同一模型/任务比较量化、异步及其组合时，使用 [组合实验协议](composable-experiments.md)：精度配置作用于policy构建，调度配置作用于runner，保持共同实验案例与统一记录格式。
+同一模型/任务比较量化、异步及其组合时，使用 [组合实验协议](composable-experiments.md)：精度配置作用于 policy 构建，调度配置作用于 runner，保持共同实验案例与统一记录格式。
 
-静态 `paper_async` 的 `overlap_actions=n′` 满足 `0≤n′≤n_action_steps`，π0.5入口映射到外部 `eval.async_delay`。按论文回取 `t−n′` 观测；论文未规定state和历史不足时的处理，本case显式选择 `same_snapshot` 与 `current_until_available`。该标签属于独立case manifest，通用v1 schema的 `async` 仍表示实际并发。
+静态 `paper_async` 的 `overlap_actions=n′` 满足 `0≤n′≤n_action_steps`，π0.5 入口映射到外部 `eval.async_delay`。按论文回取 `t−n′` 观测；论文未规定 state 和历史不足时的处理，本 case 显式选择 `same_snapshot` 与 `current_until_available`。该标签属于独立 case manifest，通用 v1 schema 的 `async` 仍表示实际并发。
 
-量化配置独立于 policy 与 kernel。每层记录模块路径、weight/activation/accumulator dtype、scale/group/zero-point 规则、calibration/pack 版本、实际 backend、fallback 原因。fake quant 只用于质量/方法分析，不作为低比特性能证明。
+量化配置独立于 policy 与 kernel。逐层记录路径、weight/activation/accumulator dtype、scale/group/zero-point、calibration/pack 版本、backend 及 fallback。fake quant 用于质量分析，低比特时延由实际 backend 测量。
 
-保留 reference、仅替换量化 GEMM、加入外围优化三个可区分的运行点。测试分层：算子误差；固定输入多步 action 误差；闭环 SR/任务时间与失败代价。尚未做的层级写“未验证”，不要将 LLM 的首 token 标准用于连续动作。
+保留 reference、量化 GEMM、量化加外围优化三个运行点。分别报告算子误差、固定输入多步动作误差、闭环 SR/任务时间及失败代价；缺少的验收层级标为未验证。
 
-π0.5 的开源后端可以作为可选 backend 候选，但不得强迫 Cosmos/LingBot 采用同一张图、同一 KV 格式或同一个量化 kernel。后端抽象共同处理 capability、输入输出和计时，模型内部细节保留在自己的模块。
+backend 共用 capability、输入输出和计时约定；图、KV 格式与量化 kernel 按π0.5、Cosmos 和 LingBot 各自实现。
 
 ## 仿真接入接口
 
 LIBERO、RoboCasa、RoboTwin、Kinetix、DOM 采用各自 adapter。公共接口定义实验语义；运行环境、批量/JIT 或独立进程方式按 [后端协议](simulator-backends.md) 保留，不要求统一逐步 Python 调用或底层状态格式。
 
-这份后端列表不是模型与环境的全组合支持表。静态任务的控制循环和动态任务的时钟/历史/过期动作协议分别实现；共享事件含义不要求两条路径使用同一个Runner。DOM与Kinetix在动态路径内也保留独立执行实现。静态与动态按任务定义，同步与异步按调度定义，二者分别配置。
+模型与环境按 case 匹配。静态控制循环与动态时钟/历史/过期动作协议分别实现；DOM 和 Kinetix 各有 runner。任务类型与同步/异步调度分别配置。
 
 `observe()` 返回真实采样时刻的快照；`step(action)` 只推进已声明的 control/physics tick；任务显式给出等待期间 robot control 和世界动力学规则。`render()` 是观测读操作，不能改变状态或阻塞控制。
 
 delay profile 是参数化外部输入，至少标识硬件、模型/配置、计时 scope、原始样本与采样方式。`zero`、虚拟重放、真实计时、additive、target-total 分开；对 target-total 记录 overshoot，对虚拟重放避免叠加宿主计算耗时。完整定义见 [仿真协议](simulation.md)。
 
-论文周期估计单列为 `paper_model`，以声明的 `Tinf`、`Tact` 和n′计算。π0.5默认 `Tact=1000/30 ms` 不改变环境步长；缺少 `Tinf` 时保留质量实验与观测偏移设置，不填造周期/加速比，也不用宿主 `eval_s` 代替。
+论文周期估计单列为 `paper_model`，以声明的 `Tinf`、`Tact` 和 n′计算。π0.5 默认 `Tact=1000/30 ms` 不改变环境步长；缺少 `Tinf` 时保留质量实验与观测偏移设置，不填造周期/加速比，也不用宿主 `eval_s` 代替。
 
 ## 可视化消费者接口
 
-第一版读取已保存 trace，展示环境帧引用、inference、queue、action、terminal；点击动作能追踪到其来源观测。先用合成样例即可验证交互与状态映射，不需要先生成论文视频。
+viewer 设计从保存的 trace 读取帧引用、inference、queue、action 和 terminal，支持按动作追踪来源观测；用合成样例验证交互与状态映射。
 
-实时 viewer 之后再增加；消费者慢时丢显示帧并计数，关键事件单独持久化。正式 benchmark 单列 tracing/录像开销。截图可以辅助 review，不能替代时间线和统计数据。
+实时 viewer 扩展采用慢消费者丢显示帧并计数、关键事件独立持久化的策略。benchmark 单列 tracing/录像开销；截图、时间线和统计各自验收。

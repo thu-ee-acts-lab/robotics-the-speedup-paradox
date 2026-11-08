@@ -28,7 +28,7 @@ python3.11 -m venv .local/envs/analysis
 export KINETIX_ANALYSIS_PYTHON="$ROBOTICS_REPO/.local/envs/analysis/bin/python"
 ```
 
-**Checkpoint:** contract validation prints `VALID`; the speedup example prints a synthetic comparison table. These environments contain NumPy/SciPy and CPU tooling. The analysis environment adds Matplotlib; model runtimes are configured separately.
+**You should see:** contract validation prints `VALID`; the speedup example prints a synthetic comparison table. These environments contain NumPy/SciPy and CPU tooling. The analysis environment adds Matplotlib; model runtimes are configured separately.
 
 <a id="2-separate-gpu-environments"></a>
 ## 2. Choose a runtime
@@ -86,7 +86,7 @@ export ROBOTICS_KINETIX_PYTHON="$ROBOTICS_REPO/.local/envs/kinetix/bin/python"
 CUDA_VISIBLE_DEVICES="$ROBOTICS_GPU" "$ROBOTICS_KINETIX_PYTHON" -c 'import jax; print(jax.__version__); print(jax.devices()); assert any(d.platform == "gpu" for d in jax.devices())'
 ```
 
-**Checkpoint:** the import check lists a GPU device. A CPU-only device list points to the driver/CUDA plugin setup; resolve that before running GPU studies.
+**You should see:** the import check lists a GPU device. A CPU-only device list points to the driver/CUDA plugin setup; resolve that before running GPU studies.
 
 ### Prepare checkpoints
 
@@ -128,7 +128,7 @@ bash benchmarks/dynamic/kinetix/run.sh \
   --output-dir runs/dynamic/kinetix/setup-001
 ```
 
-**Checkpoint:** dry-run prints the plan without creating `setup-001`; the real run creates `case-manifest.json`, `episodes.jsonl`, `requests.jsonl` and `summary.md`. `--validate-native` checks native endpoint equivalence. Continue with the [§4.5 predictor walkthrough](kinetix-latency-study.en.md), using a new output directory for its quality baseline.
+**You should see:** dry-run prints the plan without creating `setup-001`; the real run creates `case-manifest.json`, `episodes.jsonl`, `requests.jsonl` and `summary.md`. `--validate-native` checks native endpoint equivalence. Continue with the [§4.5 predictor walkthrough](kinetix-latency-study.en.md), using a new output directory for its quality baseline.
 
 ## 4. Cosmos: model stack and simulator assets
 
@@ -179,7 +179,7 @@ uv pip install --python "$COSMOS_PYTHON" \
 cd "$ROBOTICS_REPO"
 ```
 
-**Checkpoint:** Torch reports CUDA available. Use `COSMOS_CASE=libero` for the next subsection, or repeat this setup with `COSMOS_CASE=robocasa` for RoboCasa. Their `UV_PROJECT_ENVIRONMENT` directories remain separate. The owned model code uses the upstream loader and framework dependencies; preflight checks the selected source interface.
+**You should see:** Torch reports CUDA available. Use `COSMOS_CASE=libero` for the next subsection, or repeat this setup with `COSMOS_CASE=robocasa` for RoboCasa. Their `UV_PROJECT_ENVIRONMENT` directories remain separate. The owned model code uses the upstream loader and framework dependencies; preflight checks the selected source interface.
 
 ### LIBERO resources and first run
 
@@ -203,7 +203,7 @@ bash benchmarks/static/cosmos_libero/run.sh \
   --output-dir runs/static/cosmos_libero/setup-001
 ```
 
-**Checkpoint:** the single episode produces a completion manifest and summary. The resource tool downloads the policy, normalization statistics, text embeddings, VAE and simulator assets; it writes the selected interpreter/source paths to `.local/cosmos-libero.env`. Run static precision or async comparisons from [Hands-on experiments](hands-on.en.md).
+**You should see:** the single episode produces a completion manifest and summary. The resource tool downloads the policy, normalization statistics, text embeddings, VAE and simulator assets; it writes the selected interpreter/source paths to `.local/cosmos-libero.env`. Run static precision or async comparisons from [Hands-on experiments](hands-on.en.md).
 
 ### RoboCasa resources and first run
 
@@ -231,7 +231,7 @@ bash benchmarks/static/cosmos_robocasa/run.sh \
   --output-dir runs/static/cosmos_robocasa/setup-001
 ```
 
-**Checkpoint:** scene initialization succeeds, `initializations/` contains state/XML metadata, and the episode summary is written. The controller configuration comes from the Cosmos source. Run one case per process; checkpoints, three-camera inputs and normalization remain case-specific.
+**You should see:** scene initialization succeeds, `initializations/` contains state/XML metadata, and the episode summary is written. The controller configuration comes from the Cosmos source. Run one case per process; checkpoints, three-camera inputs and normalization remain case-specific.
 
 <a id="4-bind-runtime-paths"></a>
 ## 5. Bind the other model/simulator stacks
@@ -255,7 +255,7 @@ bash benchmarks/static/pi05_libero/run.sh \
   --output-dir runs/static/pi05_libero/setup-001 --dry-run
 ```
 
-**Checkpoint:** dry-run accepts the evaluator interface, LIBERO task files and model/processor configuration. Remove `--dry-run` and add `--gpu 0` to run the episode. For an existing checkpoint/tokenizer, fill [paths.env.example](../benchmarks/static/pi05_libero/paths.env.example) instead of downloading.
+**You should see:** dry-run accepts the evaluator interface, LIBERO task files and model/processor configuration. Remove `--dry-run` and add `--gpu 0` to run the episode. For an existing checkpoint/tokenizer, fill [paths.env.example](../benchmarks/static/pi05_libero/paths.env.example) instead of downloading.
 
 ### LingBot + RoboTwin
 
@@ -273,7 +273,7 @@ bash benchmarks/static/lingbot_robotwin/run.sh \
   --output-dir runs/static/lingbot_robotwin/setup-001 --dry-run
 ```
 
-**Checkpoint:** both import checks pass and dry-run resolves the task and resource files. Remove `--dry-run` and add `--gpu 0` for a single episode. The [case guide](../benchmarks/static/lingbot_robotwin/README.md) covers its model worker, cache protocol and task-seed selection.
+**You should see:** both import checks pass and dry-run resolves the task and resource files. Remove `--dry-run` and add `--gpu 0` for a single episode. The [case guide](../benchmarks/static/lingbot_robotwin/README.md) covers its model worker, cache protocol and task-seed selection.
 
 <a id="dynamicvla--dom"></a>
 ### DynamicVLA + DOM
@@ -296,7 +296,7 @@ bash benchmarks/dynamic/dynamicvla_dom/run.sh \
   --output-dir runs/dynamic/dynamicvla_dom/setup-001 --dry-run
 ```
 
-Set `ROBOTICS_DYNAMICVLA_PYTHON` to the new model environment's absolute `bin/python`, and fill the remaining six paths. **Checkpoint:** preflight prints two process commands. Remove `--dry-run` to start model and simulator on the selected idle GPUs; the run writes `client.log`, `server.log`, `summary.md` and MP4. Use `--no-record-video` to disable video.
+Set `ROBOTICS_DYNAMICVLA_PYTHON` to the new model environment's absolute `bin/python`, and fill the remaining six paths. **You should see:** preflight prints two process commands. Remove `--dry-run` to start model and simulator on the selected idle GPUs; the run writes `client.log`, `server.log`, `summary.md` and MP4. Use `--no-record-video` to disable video.
 
 <a id="3-models-tasks-and-simulator-assets"></a>
 ## 6. Resource locations and output files

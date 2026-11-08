@@ -1,25 +1,12 @@
 # Inference optimization experiments
 
-This entry measures one complete policy call from a prepared CPU observation to
-a CPU action chunk. Model loading, weight packing, compilation, CUDA Graph
-capture and warmup are separate. Simulator/control-period timing is not included.
-All console output and generated report labels are English.
+Use [run.py](run.py) to time a complete policy call, from a prepared CPU observation to a CPU action chunk. Loading, weight packing, compilation, graph capture and warmup are measured separately. The case runners record simulator and control time. Output labels are in English.
 
-Start with the [Cosmos quantization guide](../../docs/cosmos-quantization.md)
-for integer formats, a shared LIBERO/RoboCasa recipe and measured comparisons.
-Use this page to configure benchmark inputs, optimization switches and output
-records, then evaluate selected variants with the case runners.
+Start with the [hands-on timing example](../../docs/hands-on.en.md#hardware) or [Cosmos recipe](../../docs/cosmos-quantization.md). This page defines input, switch and measurement interfaces.
 
-Model execution code is maintained in `src/robotics_bench/models/`. PI0.5 owns its
-PaliGemma/Gemma/SigLIP forwards; Cosmos owns its policy, sampler and DiT forwards.
-Common framework services, Cosmos VAE/attention libraries and simulator packages
-remain optional external dependencies. Original source hashes and licenses are
-recorded alongside the imported code.
+The model forward implementations live in `src/robotics_bench/models/`: PaliGemma/Gemma/SigLIP for PI0.5, and policy/sampler/DiT for Cosmos. Install their loader, framework and VAE/attention dependencies in the model environment. The source directories include their original hashes and licenses.
 
-Use the existing case environment and resource variables from
-`benchmarks/static/pi05_libero/paths.env.example` or
-`benchmarks/static/cosmos_libero/paths.env.example`. The benchmark never downloads
-weights. Prepare missing resources with `tools/prepare_resources.py` first.
+Activate the matching model environment. Copy `benchmarks/static/<case>/paths.env.example` to `.local/`, fill in your paths, and source that file. Prepare missing weights with `tools/prepare_resources.py`; the benchmark loads local resources.
 
 ```bash
 python benchmarks/inference/run.py \
@@ -34,14 +21,9 @@ python benchmarks/inference/run.py \
   --render-python /path/to/render-env/bin/python
 ```
 
-The input NPZ uses prepared LeRobot CPU observation keys for PI0.5; for Cosmos it
-contains raw `primary_image`, `wrist_image`, and `proprio` arrays as required by
-its simulator boundary. Additional `--validation-input` files and
-`--validation-seed` values broaden the numerical comparison. Input files must
-belong to the declared task; no alternate task instruction is inferred.
+For PI0.5, supply an NPZ with prepared LeRobot CPU observation keys. For Cosmos, use the raw image/proprio keys of the selected case. Add `--validation-input` and `--validation-seed` to compare more observations and random seeds. Use the task instruction saved with the input.
 
-The entry always measures an unoptimized BF16 anchor. For low precision it also
-measures BF16 with the same shared optimizations, then the selected candidate:
+Each run first measures original BF16. Integer runs also measure BF16 with the same shared optimizations, so you can separate the benefit of quantization from the other switches:
 
 ```bash
 export CUDA_HOME=/path/to/compatible-cuda
@@ -49,41 +31,13 @@ export CUDA_HOME=/path/to/compatible-cuda
 # --precision int8 --quant-scope text --enable shared_quant --enable activation_quant_fusion
 ```
 
-Integer formats use signed INT8 or packed signed INT4, dynamic per-row activation
-scales, per-output-channel weight scales, S32 accumulation and a BF16 epilogue.
-Integer source and its pinned CUTLASS headers are packaged inside robotics;
-the build resolves headers from `src/robotics_kernels/ampere_ada/third_party/cutlass/`.
-Activation prepare/pack and output conversion are part of the timing. Tactics 0
-through 7 select explicit CUTLASS tiles; compare them on real shapes with
-`--integer-tactic`. INT4/INT8 use integer encodings; FP4/FP8 use floating-point formats.
-Report action differences for each low-precision candidate.
-FP4/FP8 sources and build tooling are preserved under
-`src/robotics_kernels/blackwell/` and `tools/build_blackwell.py`; they require a
-compatible Blackwell device/toolchain and separate hardware validation.
+Integer formats use signed INT8/packed INT4, dynamic per-row activation scale, per-output-channel weight scale, S32 accumulation and BF16 output. Preparation, packing and conversion are timed. Tactics 0–7 select CUTLASS tiles through `--integer-tactic`; headers come from `src/robotics_kernels/ampere_ada/third_party/cutlass/`. FP4/FP8 have separate encodings and sources under `blackwell/`, with `tools/build_blackwell.py` for target-device validation. Record action differences for every precision.
 
-For Cosmos use `--case cosmos_libero`, its resource variables, and appropriate
-switches: `modulation`, `gated_residual`, `cuda_graph`, and integer-specific
-`shared_quant`/`activation_quant_fusion`. Its quantization scope is `dit`.
+Cosmos uses `--case cosmos_libero` or `cosmos_robocasa`, matching resource variables and `--quant-scope dit`. Shared switches include `modulation`, `gated_residual`, `cuda_graph`; integer preparation adds `shared_quant`/`activation_quant_fusion`.
 
-`norm_modulation_quant` additionally fuses non-affine LayerNorm with AdaLN
-modulation and activation packing. It requires `modulation`, `modulation_quant`,
-INT4 or INT8, and the `dit` scope. LIBERO and RoboCasa use the same owned kernel
-and DiT adapter; their observations, checkpoints and VAE settings stay case-specific.
-Only boundaries whose consumers are all integer projections use the fused path;
-other boundaries retain native normalization. The kernel preserves BF16 rounding
-between normalization, multiplication and addition, but its FP32 reduction order
-can differ from native LayerNorm. Evaluate its recorded same-precision action drift as a numerical candidate.
-It is disabled by default. Remove only `--enable norm_modulation_quant` to return
-to native LayerNorm plus the existing modulation/packing fusion.
+`norm_modulation_quant` requires `modulation`, `modulation_quant`, INT4/INT8 and `dit`. It fuses non-affine LayerNorm, AdaLN and packing where all consumers are integer projections; other boundaries retain native normalization. BF16 intermediate rounding is retained, but FP32 reduction order can change actions. The shared LIBERO/RoboCasa adapter records same-precision drift. Remove this default-off switch to restore native LayerNorm.
 
-`residual_norm_modulation_quant` further combines the preceding gated residual
-with normalization and packing at the cross-attention and MLP input boundaries.
-It requires `norm_modulation_quant` and `gated_residual`. The BF16 residual is
-still written for the later skip connection, while normalization consumes it
-directly inside the kernel. Single-format integer consumers use this path;
-mixed-format or unquantized boundaries keep the separate implementation. The
-final MLP residual stays separate. This switch shares the normalization
-candidate's numerical caveat and is also disabled by default.
+`residual_norm_modulation_quant` requires `norm_modulation_quant` and `gated_residual`. It adds the preceding residual at cross-attention/MLP input boundaries, writes BF16 for the skip path and normalizes inside the kernel. Mixed-format/unquantized boundaries and the final MLP residual stay separate. It shares the normalization rounding tradeoff and defaults off.
 
 Add the following to an existing Cosmos INT4/INT8 command that already enables
 `modulation` and `gated_residual` to evaluate the complete fusion:
@@ -92,22 +46,13 @@ Add the following to an existing Cosmos INT4/INT8 command that already enables
 --enable modulation_quant --enable norm_modulation_quant --enable residual_norm_modulation_quant
 ```
 
-Each result directory contains a manifest, repeated measurements, numerical
-checks, checkpoint audit and a skill-compatible `ledger.json`. `--profile` adds
-separate diagnostic traces/tables. With `--profile-skill`, every completed round
-also produces timestamped PNG/SVG/Markdown, an interactive HTML page and its
-manifest under `figures/`. Install CairoSVG/Cairo only in the rendering environment.
+Each output includes a manifest, repeated timings, numerical checks, checkpoint audit and `ledger.json`. `--profile` adds separate traces/tables; `--profile-skill` renders timestamped PNG/SVG/Markdown, HTML and a manifest under `figures/`. CairoSVG/Cairo belongs in the rendering environment.
 
-Report fixed-input action equality and quantization drift separately, then
-measure task success with a matched closed-loop evaluation. Compute each speedup
-directly against the BF16 anchor in the same measurement cohort.
+Report same-precision equality, quantization drift and paired task success separately. Compute speedups directly from the same cohort's BF16 anchor.
 
-For a rollout, the existing case launchers accept `--model-runtime owned`,
-repeatable `--enable`, `--precision`, `--quant-scope` and `--integer-tactic`.
-The optimization defaults are disabled. `cuda_graph` on PI0.5 requires
-`flow_loop`; caches/graphs are per model instance and assume immutable weights
-and serialized calls. Reinstall the optimization context after changing weights.
-The `native` runtime remains an explicit reference and rejects local switches.
+You can apply a selected configuration to a rollout with the case launcher's `--model-runtime owned`, `--enable`, `--precision`, `--quant-scope` and `--integer-tactic` options. Switches default off; PI0.5 `cuda_graph` also needs `flow_loop`.
+
+Use one model instance for serialized calls and keep its weights fixed while a graph or cache is active. Reinstall the optimization context after changing weights. Select `native` for the reference runtime; it rejects local optimization switches.
 
 Capture several real initial observations using the matching case environment:
 
@@ -118,16 +63,9 @@ python benchmarks/inference/capture_libero.py \
   --output-dir runs/optimization/inputs/pi05-object
 ```
 
-Pass `observation-000.npz` as `--input` and the other files as repeatable
-`--validation-input` arguments. The capture manifest records task text and actual
-initial-state IDs. Capturing observations runs the simulator; timing replay uses
-the saved observations and does not run or advance the simulator.
+Use `observation-000.npz` as `--input`, others as repeatable `--validation-input`. Capture records actual task text and initial states. It runs the simulator; timing replays only the saved observations.
 
-`empty_image_cache` is an additional PI0.5 option requiring `cuda_graph`. It
-reuses only the encoder output for known missing-camera placeholders, whose
-pixels are fixed by the owned policy. Real observation images are always
-re-encoded. Changing camera-presence roles invalidates the graph; cached
-embedding storage is retained for the lifetime of its graph.
+PI0.5 `empty_image_cache` requires `cuda_graph` and caches fixed missing-camera placeholder encodings. Real images are re-encoded. Camera-role changes invalidate the graph; embedding storage lasts as long as the graph.
 
 ## Integer fusion and tuning
 
@@ -147,18 +85,9 @@ Add independent switches to the complete policy benchmark or case launcher:
 # --enable integer_group_views   # requires projection grouping
 ```
 
-`integer_grouped` enables both projection group kinds. Mixed integer formats are
-grouped only within compatible subsets. `integer_group_views` avoids explicit
-output-slice copies; model consumers still determine any further layout work.
-Group output and input caches belong to one serialized model call.
+`integer_grouped` enables both QKV and Gate-Up grouping, partitioned by compatible integer format. `integer_group_views` removes explicit slice copies; consumers determine further layout work. Buffers belong to one serialized model call.
 
-For a cohort with one loaded model, `--variants FILE` accepts a list of variant
-objects with `id`, `precision`, `switches`, `scopes` and `tactic`. Omitted fields
-inherit CLI settings. IDs must be unique safe filenames. Shared fusion switches
-must match the CLI configuration so every low-precision row has a matching BF16
-reference. Quantization-specific switches may differ. The benchmark also saves
-validation action arrays and comparisons against the first same-precision row.
-Large action drift is reported and does not stop finite-output performance tests.
+To compare several configurations with one loaded model, pass `--variants FILE`. The JSON list accepts `id`, `precision`, `switches`, `scopes` and `tactic`; omitted values come from the CLI. Give each entry a unique filename-safe ID. Shared switches must match the CLI unless you add `--ablate-shared`; quantization switches may differ. The output includes action arrays and comparisons with the first row at the same precision. Timing continues for finite outputs, with the observed action differences recorded.
 
 Measure individual shapes separately from complete policy latency:
 
@@ -171,51 +100,21 @@ python benchmarks/inference/render_integer.py \
   --render-python /path/to/render-env/bin/python
 ```
 
-Shapes come from recorded PI0.5 text and Cosmos DiT calls, including explicit
-projection concatenations. `prepared_gemm` excludes activation preparation;
-`complete_linear` includes it. Both use CUDA events around repeated graph nodes,
-not policy wall time. The JSON retains every tactic and repeated sample; CSV
-lists the best observed complete-Linear tactic per shape/precision. It does not
-silently change a model's dispatch policy. Validate the chosen tactic in the
-complete policy path on the same GPU.
+Shapes come from recorded PI0.5 text/Cosmos DiT calls and projection concatenations. `prepared_gemm` excludes activation preparation; `complete_linear` includes it. Both use CUDA events around repeated graph nodes. JSON retains every tactic/sample; CSV selects the fastest observed complete Linear per shape/precision. Apply a tactic explicitly and validate it in the complete policy on that GPU.
 
-Diagnostic charts distinguish integer and floating matrix work, matrix reduction,
-copy/cast, normalization, quantization and pointwise arithmetic. GPU duration
-sums remain separate from synchronized policy-service medians. Breakdowns with
-more than four profiles are paginated with their original anchor repeated.
+Charts separate matrix, reduction, copy/cast, normalization, quantization and pointwise work. GPU sums and synchronized policy medians remain distinct; more than four profiles are paginated with the original anchor repeated.
 
-`integer_biasless` is an experimental specialized epilogue for Linear modules
-without bias; real bias uses the normal epilogue. It is independently switched
-and is not automatically selected from an insignificant timing difference.
+`integer_biasless` explicitly selects a specialized no-bias epilogue; biased modules retain their normal epilogue.
 
-PI0.5 additionally supports `condition_projection_cache`, requiring
-`condition_cache` and `flow_loop`. It reuses adaptive-normalization projections
-of registered, immutable timestep embeddings. Observation-dependent hidden
-states are still recomputed. Weights and timestep-embedding settings must remain
-unchanged within the optimization context; reinstall the context after changing
-them. Graphs retain their condition/projection buffers through their lifetime.
+PI0.5 `condition_projection_cache` requires `condition_cache` and `flow_loop`. It caches projections of registered immutable timestep embeddings, while observation-dependent states are recomputed. Keep weights/timestep settings fixed or reinstall the context; graphs retain their projection buffers.
 
-For experiments changing shared optimizations between variants, explicitly add
-`--ablate-shared`. The benchmark inserts a matching BF16 measurement for each
-distinct shared-switch set. Without it, mismatched shared switches are rejected.
+`--ablate-shared` permits shared-switch changes and inserts matched BF16 measurements for each distinct set.
 
-The [progressive quantization protocol](../../docs/protocols/progressive-quantization.md)
-defines Cosmos `--progressive-sweep`, single `--quant-tier` settings and the
-matched task-pilot entry `evaluate_cosmos.py`. The current adaptation retains
-BF16 as the full-precision reference and measures its own speedups.
+[Progressive quantization](../../docs/protocols/progressive-quantization.md) defines Cosmos `--progressive-sweep`, `--quant-tier` and the matched `evaluate_cosmos.py` pilot, using this repository's measured BF16 reference.
 
-Current quantization work prioritizes Cosmos. PI0.5 uses `--quant-scope text`;
-its action expert/diffusion scope is deferred. Older scope-expansion measurements
-are exploratory records, not recommended presets.
+Use Cosmos DiT or PI0.5 `--quant-scope text` for the documented recipes; action-expert/diffusion scope measurements remain exploratory.
 
-Cosmos has an experimental `modulation_quant` switch, used together with integer
-precision and `modulation`. It keeps the native LayerNorm reduction and fuses
-BF16 modulation with dynamic activation quantization, avoiding an intermediate
-BF16 activation write/read. Mixed tiers prepare only the formats needed by each
-consumer group. The packed carrier stays inside the owned model; the engine's
-CPU action interface is unchanged. Same-format action equality and complete
-policy timings must both be checked; faster producer microbenchmarks alone do
-not establish end-to-end benefit.
+Cosmos `modulation_quant` requires integer precision and `modulation`. It keeps native LayerNorm, fuses BF16 modulation with dynamic quantization and prepares only the formats each mixed-tier consumer needs. Packed data stays inside the model; CPU action output is unchanged. Check same-format actions and complete-policy latency.
 
 To inspect the actual per-layer formats recorded by a completed tier sweep:
 
@@ -227,9 +126,7 @@ python benchmarks/inference/render_progressive.py \
 
 ## RoboCasa and remaining Cosmos hotspots
 
-`--case cosmos_robocasa` uses the `ROBOTICS_COSMOS_ROBOCASA_*` model-resource
-variables, three cameras and H=32. It never falls back to the LIBERO checkpoint
-or its H=16 configuration. Use the separate RoboCasa Python environment.
+RoboCasa uses its own Python environment, `ROBOTICS_COSMOS_ROBOCASA_*` resources, three cameras and H=32; LIBERO uses H=16.
 
 Capture a real reset observation and read its actual instruction from the
 generated manifest before starting replay:
@@ -248,13 +145,9 @@ python benchmarks/inference/run.py --case cosmos_robocasa \
   --output-dir runs/optimization/robocasa/int4-001 --profile
 ```
 
-Capture uses a physical numeric GPU index for RoboCasa EGL. It saves the actual
-post-settling three-camera input, language, scene state and fingerprints. A
-different scene may produce a different instruction; do not infer it from the
-environment class name. Simulator execution is excluded from replay timings.
+Capture selects RoboCasa EGL with a physical numeric GPU index and saves post-settling images, actual language, scene state and fingerprints. Use that language for replay, whose timing excludes simulation.
 
-The following shared optimizations have separate switches and remain disabled
-by default. Use matched BF16 controls when evaluating their quantized variants.
+These shared switches default off; compare quantized variants with matched BF16 controls:
 
 | Switch | Scope and boundary |
 | --- | --- |
@@ -267,22 +160,11 @@ by default. Use matched BF16 controls when evaluating their quantized variants.
 | `conv_cutlass_c96_0` ... `conv_cutlass_c96_7` | Explicit VAE 96-to-96, 3x3x3, stride-one family ablation on channels-last 3D inputs. Other modules/layouts remain native with recorded reasons. `conv_cutlass_c96` is an alias for tactic 0. |
 | `conv_cutlass_0` ... `conv_cutlass_7` | Experimental broader dispatch for supported BF16 Conv2d/3d modules. These are explicit tactics, not automatic fastest-kernel selection. |
 
-CUTLASS convolution preserves the native causal padding and feature-cache
-wrapper. Its complete-call timing includes required activation/output layout
-conversions; weight packing is initialization work. Different reduction orders
-in convolution or attention may change outputs. Record the actual action
-comparison and full policy timing even when a microbenchmark looks faster.
+CUTLASS preserves causal padding/cache handling; complete-call timing includes activation/output layout conversion, while weight packing is initialization work. Convolution/attention reduction changes can affect actions, so compare both output and full-policy latency.
 
-To compare against cuDNN algorithm search, start a fresh benchmark process with
-`--cudnn-benchmark`. This is a whole-cohort environment setting applied before
-model loading, not a per-variant switch: toggling it after a convolution has run
-does not invalidate PyTorch's cached execution plan. The manifest records
-benchmark/benchmark_limit, deterministic and TF32 settings; never treat two
-different cuDNN modes as one measurement cohort.
+Set `--cudnn-benchmark` before loading the model in a fresh process; changing it later preserves cached plans. The manifest records benchmark/benchmark_limit, deterministic and TF32 settings. Keep each cuDNN mode in its own cohort.
 
-The [owned convolution notes](../../src/robotics_kernels/ampere_ada/CONVOLUTION.md)
-describe the pinned CUTLASS iterator, layout, tile/pipeline choices and their
-resource tradeoffs. CUDA code and build headers are maintained inside robotics.
+[Convolution notes](../../src/robotics_kernels/ampere_ada/CONVOLUTION.md) explain the pinned iterator, layout, tiles and pipeline/resource tradeoffs.
 
 ```bash
 python benchmarks/inference/bench_convolution.py \
@@ -301,28 +183,11 @@ python benchmarks/inference/render_breakdown.py \
 The PNG adapter converts the skill's CSS HSL colors to equivalent RGB for
 CairoSVG compatibility. The original SVG and raw durations are retained.
 
-Integer GEMM already applies activation/weight scales, bias and BF16 conversion
-inside its epilogue, without a separate INT32-result dequantization pass.
-Activation quantization and packing still write GPU buffers before GEMM.
-Shared QKV input preparation does not imply a grouped QKV GEMM: grouping must be
-enabled explicitly. GEMM-to-residual and whole-row-quantization boundaries remain
-separate optimization opportunities; CUDA Graph does not fuse those kernels.
+Integer GEMM fuses scale, bias and BF16 conversion in its epilogue. Activation quantization/packing still writes GPU buffers. QKV grouping is an independent switch; CUDA Graph replays kernels rather than fusing GEMM, residual and row-quantization boundaries.
 
-The spatial-padding adapter is independently maintained in
-`src/robotics_bench/optimizations/cosmos_vae_memory.py`. Its method reference is
-worldmodel revision `51529dc48047c61c17bd25fc088c8569c005ddd1`,
-`wan/modules/vae2_1.py`; that project is not a runtime dependency. The context
-enters before any CUTLASS convolution plan reads padding and restores both the
-forward method and padding on exit. Asymmetric downsample padding is untouched.
-Changing the convolution descriptor may select a different kernel and change
-floating-point rounding. Evaluate the complete-policy latency and action
-differences with this option on and off.
+`src/robotics_bench/optimizations/cosmos_vae_memory.py` owns spatial padding; its method reference is worldmodel revision `51529dc48047c61c17bd25fc088c8569c005ddd1`, `wan/modules/vae2_1.py`. The context changes symmetric spatial padding before convolution planning and restores it/methods on exit; asymmetric downsample padding stays native. Check descriptor-induced rounding and complete-policy latency.
 
-For the current action-only Cosmos path, the relevant VAE work is encoding;
-future-image decoding is disabled. Worldmodel's steady decoder batching,
-upsample folding, FP32 encoder kernels and SM110-specific C96 epilogues need
-separate applicability checks. Preserve Cosmos's configured temporal window,
-tail handling and per-request cache clearing when adapting further techniques.
+Cosmos action inference encodes VAE inputs with future-image decoding disabled. Preserve its temporal window, tail handling and request cache lifecycle. Decoder batching, upsample folding, FP32 encoder kernels and SM110-specific C96 epilogues require separate applicability checks.
 
 `vae_condition_prefix` uses one adapter and encoder gate for the supported cases:
 
@@ -331,25 +196,8 @@ tail handling and per-request cache clearing when adapting further techniques.
 | LIBERO | 33 / 9 | 4 | 16 | `primary_image`, `wrist_image` |
 | RoboCasa | 41 / 11 | 5 | 32 | `primary_image`, `secondary_image`, `wrist_image` |
 
-With the configured 16-frame encoder window, both execute the first 1+16 raw
-frames. LIBERO skips the final 16-frame chunk; RoboCasa skips the final 16+8
-frames. Finite feature tensors replace omitted chunks before the unchanged full
-final projection (9 or 11 latent frames). The engine request must match the
-case selected by the model's geometry. The VAE normalization/SiLU switches also
-share the same implementation across both cases. Enable them independently with
-`--enable vae_norm_fusion --enable vae_silu_fusion --enable vae_condition_prefix`.
-The policy-specific encode method still executes, including
-its RNG seeding and cache clearing. Every denoise call checks that the omitted
-suffix remains unconditioned. A changed/invalid mask raises before actions are
-delivered. This is an **engine action-output** optimization: callers consuming
-the private `orig_clean_latent_frames` suffix must not enable it. Direct VAE
-encoding outside the engine's explicit action request uses the native path.
+With the 16-frame encoder window, both cases execute the first 1+16 frames. LIBERO skips 16 trailing frames; RoboCasa skips 16+8. Finite feature tensors fill omitted chunks before the unchanged full projection (9/11 latent frames). The model geometry selects the case; normalization/SiLU share an implementation. Enable independently with `--enable vae_norm_fusion --enable vae_silu_fusion --enable vae_condition_prefix`. Native RNG seeding/cache clearing remain, and every denoise validates the unconditioned suffix. This action-only path omits `orig_clean_latent_frames`; consumers of that suffix must leave `vae_condition_prefix` off. Direct VAE calls outside engine action requests retain native encoding.
 
-`cross_kv_cache` does not cache queries or attention outputs, and recomputes K/V
-for every request, including repeated prompts. Same-request context changes are
-rejected; inference tensors without version counters are compared to a snapshot.
-Those checks, snapshot copies and buffer refreshes are included in complete-policy
-timing. Nonidentity text projections, image cross-attention, training and context
-parallelism are unsupported. Weights and precision must remain immutable while
-the optimization context is active. The engine and each cache require serialized
-calls; use distinct model instances for concurrent requests.
+`cross_kv_cache` prepares K/V once per request, even when the prompt repeats. Queries and attention outputs are recomputed. If the context changes during a request, the call fails; tensors without version counters are checked against a saved copy. Complete-policy timing includes these checks, copies and refreshes.
+
+Use the cache for serialized inference with identity text projection and fixed weights/precision. Image cross-attention, training and context parallelism are unsupported. Give concurrent requests separate model instances.

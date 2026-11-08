@@ -11,7 +11,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 [论文 PDF](https://arxiv.org/pdf/2606.28529) · [引用](#citation) · [环境配置](docs/environment_setup.md) · [实验实操](docs/hands-on.md) · [§4.5预测器](docs/kinetix-latency-study.md) · [贡献指南](CONTRIBUTING.md)
 
-把推理优化与任务结果连接起来。本仓提供上述论文的模型引擎、低精度算子与闭环评估工具，在匹配的任务场景下比较量化、异步执行和采样步数，联合测量推理耗时、成功率与动作数。
+这个项目提供论文使用的模型推理引擎、低精度算子和仿真实验脚本。你可以固定模型和任务，比较量化、异步执行和采样步数对推理时间、任务成功率及动作数量的影响。
 
 从下表选择 case，准备对应的模型与模拟器环境，再运行基线和待评估的优化方案。各指南提供资源、命令和验证记录；[许可与来源](THIRD_PARTY_NOTICES.md)单独维护。
 
@@ -45,7 +45,7 @@ Yujin Wang, Junli Chen, Yixuan Li, Shunan Dong, Huazhong Yang, Yongpan Liu, Hong
 
 ## 支持的模型与任务
 
-模型、checkpoint、任务和模拟器按 **case** 绑定；下表中的组合有各自的运行入口和环境。
+项目把一组模型和任务环境的搭配称为 **case**。每个 case 都有自己的启动脚本和环境配置，可以从下表选择。
 
 | 类型 | Case / 运行指南 | 当前实现 |
 | --- | --- | --- |

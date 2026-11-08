@@ -2,9 +2,9 @@
 
 [中文](kinetix-latency-study.md) · [Experiment hands-on guide](hands-on.en.md) · [Environment setup](environment_setup.en.md) · [Single KINETIX run](../benchmarks/dynamic/kinetix/README.md)
 
-This workflow implements the response-composition experiment in [paper §4.5, Predictive TISED](https://arxiv.org/html/2606.28529v3#S4.SS5). Measure policy quality, delay sensitivity and hardware inference time separately, then compose a success-rate curve for each platform and predict its preferred sampling count. Run hardware-mapped evaluation afterward to test the predictions.
+How many sampling steps should you use on a different GPU? This tutorial follows [paper §4.5, Predictive TISED](https://arxiv.org/html/2606.28529v3#S4.SS5): measure policy quality, the effect of delay and hardware inference time, use them to predict the best sampling count for each platform, then run experiments to check those predictions.
 
-Start with one task and 32 paired seeds per condition, then expand the study. Model, KINETIX and Jax2D execution source are maintained here; prepare a JAX environment and trusted RTC checkpoints.
+Start with one task, follow the steps below, then add tasks or episodes. Set up the JAX environment and RTC checkpoint before starting.
 
 ## How the predictor works
 
@@ -37,18 +37,7 @@ flowchart LR
     validation --> report["Compare predictions and selections"]
 ```
 
-### Paper settings and the repository implementation
-
-The repository follows the same separate-calibration, composition and validation workflow with these fitting choices:
-
-| Component | Paper §4.5 / Appendix B.2 | Current analyzer |
-| --- | --- | --- |
-| Zero-delay quality | Task-specific constant or logistic response fitted by binomial maximum likelihood | Empirical rates at s=1–5; shape-preserving PCHIP interpolation for continuous plots |
-| Fine delay response | Task-specific logistic or linear response normalized at zero delay | Binomial Hill fit compared with a no-delay-effect constant model using AIC |
-| Coarse delay response | Coarse comparisons use rounded action delay | Effective-delay calibration lookup divided by zero-delay s=5 success |
-| Composition and selection | Fix calibrated responses, then compare hardware predictions and measurements | Freeze integer predictions and plotted curve samples before validation and selection-error analysis |
-
-At integer s, `G(s)` therefore uses the measured task result directly. The fine-mode Hill factor is `1 / (1 + (D / tau)^power)`; the analyzer uses factor 1 when the Hill model does not improve AIC sufficiently. See [fit_task_model / predict_success](../benchmarks/dynamic/kinetix/analyze_latency_study.py) for the implementation.
+The commands below run the predictor provided in this repository. See [the implementation](../benchmarks/dynamic/kinetix/analyze_latency_study.py) if you want to inspect the fitting methods.
 
 ## Timing and experiment conditions
 
@@ -118,7 +107,7 @@ Inspect `case-manifest.json`, `episodes.jsonl` and `summary.md` in each task dir
   --start-seed "$KINETIX_START_SEED" --output-dir "$KINETIX_STUDY"
 ```
 
-The plan binds tasks, s, delays, seeds, source and checkpoint identity. Inspect `study.json` and the summary printed by plan before execution; `status.json` is created when the first run phase starts. One task has 57 logical conditions and 31 unique new execution conditions. Conditions with the same task, s and float32 command weights share results with explicit provenance. The example adds 992 study episodes and 20 verification rollouts, for 1172 rollouts including the quality baseline.
+The command writes `study.json` and prints the planned work. Check the task settings and episode count before continuing. `status.json` appears when the next step starts.
 
 ## 4. Verify zero-delay execution consistency
 
@@ -172,7 +161,7 @@ for key, rows in sorted(groups.items()):
 PY
 ```
 
-Read `calibration/report.md` and `frozen-model.json` as well. `kind` identifies Hill, constant or coarse lookup. `calibration_rmse` measures disagreement with calibration points. `requires_review` is set when RMSE or the largest upward rate change exceeds 0.1; inspect the response shape and sampling noise when it appears. This is a descriptive diagnostic rather than a significance test. Changes to tasks, data or model after freezing require a new study.
+Open `calibration/report.md` to inspect the fit, then use the command above to view recommended sampling counts. If you need to change tasks or calibration data, start a new run in a new output directory.
 
 ## 7. Evaluate hardware-mapped conditions
 
@@ -182,9 +171,9 @@ Read `calibration/report.md` and `frozen-model.json` as well. `kind` identifies 
   --python "$ROBOTICS_KINETIX_PYTHON" --gpus "$KINETIX_GPU"
 ```
 
-Each hardware condition injects its CSV latency `L_hardware(s)` into the same policy and physics environment and measures rollout success. The validation phase records the frozen-prediction hash. Analysis checks that predictions, study plan and calibration evidence still match.
+This step runs the simulator with each hardware delay from the CSV and records the results for comparison with the saved predictions.
 
-Validation uses the same paired seeds to compare delay conditions. It tests **held-out experimental conditions**, rather than new seeds or scenes. Cells reusing quality/calibration data are marked `calibration_overlap` and excluded from held-out RMSE.
+Validation tries new combinations of sampling steps and delays with the same random seeds. The report separates new results from reused calibration results.
 
 ## 8. Generate the report and read the four-panel figure
 
@@ -212,13 +201,9 @@ Start with `analysis/report.md`, then open each task/mode's `*-four-panel.png` o
 | `empirical_selection_gap` | Best measured success minus measured success at the predicted selection; smaller is better |
 | `calibration_overlap_cells` | Validation conditions that reuse quality/calibration results |
 
-Observed success rates have 95% Wilson intervals. Selection-gap intervals use paired-seed bootstrap, with 2000 replicates by default, conditional on the frozen predictions. Step summaries include all episodes with failures penalized at the 256-step budget and successful episodes separately. Execution errors have separate records.
-
 ## Scale up or supply your own hardware measurements
 
-Choose tasks and sample size before creating new quality and study directories. Repository defaults are `mjc_walker,catapult,trampoline,mjc_half_cheetah` with 512 seeds per condition. Paper §4.5 uses Grasp, Half-cheetah and Walker with 1024 paired seeds; their repository task IDs are `grasp_easy,mjc_half_cheetah,mjc_walker`.
-
-Change the Step 1 variables to your task set and `KINETIX_EPISODES=512` or `1024`, then repeat from Step 2. Quality collection and planning must use matching tasks, episode counts and starting seeds; quality collection always covers s=1–5. The 32-seed example teaches the workflow. Interpret study results using the predeclared sample size and confidence intervals.
+To add tasks or episodes, change `KINETIX_TASKS` and `KINETIX_EPISODES` in Step 1, choose new output directories, and start again from Step 2. Use the same variables for quality collection and `plan`.
 
 Pass your CSV through the planner's `--hardware-profiles /path/to/profiles.csv`. It reads `profile_id,flow_steps,latency_ms` and requires all four profile IDs above, each with s=1–5; additional provenance columns can be retained. Latencies are in milliseconds. Re-plan after changing the archive so the hardware input becomes part of the fixed provenance.
 
@@ -236,7 +221,7 @@ Pass your CSV through the planner's `--hardware-profiles /path/to/profiles.csv`.
 "$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py status --study-dir "$KINETIX_STUDY"
 ```
 
-After interruption, repeat the same `run --phase ...` command. Complete jobs are reused after hash checks; live workers are adopted by PID and output path. A stopped incomplete job keeps its old attempt and restarts as a whole in a new attempt. `--reuse-study /path/to/previous-study` explicitly reuses matching jobs from another study; retain the source directory.
+After interruption, repeat the same `run --phase ...` command. Completed jobs are skipped. An unfinished job restarts in a new attempt directory, keeping its previous files. To reuse matching jobs from another study, add `--reuse-study /path/to/previous-study` and keep that directory available.
 
 Once familiar with the individual phases, let the controller run verification, calibration, freeze, validation and reporting in order:
 

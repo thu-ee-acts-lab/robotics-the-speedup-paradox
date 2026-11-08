@@ -2,9 +2,9 @@
 
 [English](kinetix-latency-study.en.md) · [实验操作总览](hands-on.md) · [环境配置](environment_setup.md) · [KINETIX 单次运行](../benchmarks/dynamic/kinetix/README.md)
 
-这个工作流对应论文 [§4.5 Predictive TISED](https://arxiv.org/html/2606.28529v3#S4.SS5)：先分别测量策略质量、延迟敏感性和硬件推理时间，再组合出每个平台的成功率曲线，预测应该使用多少个采样步。最后才运行硬件映射实验，检验预测与实测是否一致。
+这份教程回答一个问题：换一张 GPU 后，应该用多少个采样步？按照论文 [§4.5 Predictive TISED](https://arxiv.org/html/2606.28529v3#S4.SS5) 的方法，我们先测量策略质量、延迟带来的影响和硬件推理时间，再预测每个平台上表现最好的采样步数，最后运行实验检查预测。
 
-本页先用一个任务、每条件32个配对seed走通流程，再说明如何扩大实验。模型、KINETIX与Jax2D执行源码由本仓维护；你需要准备JAX环境和可信的RTC checkpoint。
+先用一个任务跑通下面的步骤，再增加任务或回合数。开始前需要配置好 JAX 环境和 RTC 模型权重。
 
 ## 预测器如何工作
 
@@ -37,20 +37,8 @@ flowchart LR
     validation --> report["比较预测与选点结果"]
 ```
 
-### 论文设置与仓内实现
+下面通过现有命令运行预测器。想了解拟合方法，可以查看[实现代码](../benchmarks/dynamic/kinetix/analyze_latency_study.py)。
 
-本仓提供同一“分开校准—组合预测—独立验证”流程的工程实现，拟合形式如下：
-
-| 部分 | 论文§4.5 / 附录B.2 | 当前分析器 |
-| --- | --- | --- |
-| 零延迟质量 | 按任务使用常数或logistic响应，二项最大似然拟合 | 保留s=1～5的实测成功率；连续绘图使用PCHIP形状保持插值 |
-| fine延迟响应 | 按任务使用logistic或线性响应，以零延迟锚点归一化 | 二项似然拟合Hill曲线，并与无延迟效应的常数模型比较AIC |
-| coarse延迟响应 | 粗粒度对照采用取整后的动作延迟 | 按校准的有效延迟网格查表，并除以s=5零延迟成功率 |
-| 组合与选点 | 固定校准响应，比较硬件预测和实测 | 冻结整数预测与绘图采样点，再验证、计算误差与选点损失 |
-
-因此，`G(s)`在整数点直接采用本轮任务结果。fine的Hill因子为 `1 / (1 + (D / tau)^power)`；当它相比常数模型没有足够的AIC改善时使用因子1。具体实现见 [fit_task_model / predict_success](../benchmarks/dynamic/kinetix/analyze_latency_study.py)。
-
-<a id="两种延迟模式"></a>
 ## 时间与实验条件
 
 两种模式都保持 `physics_dt=1/60 s`、`frame_skip=2`，每条控制指令33.333 ms；预测8条动作、执行4条后刷新。fine按原生物理槽混合新旧执行器指令，coarse按控制周期nearest-even取整。`native-blend`、`legacy-round`分别是兼容别名。完整公式见 [KINETIX延迟模式](../benchmarks/dynamic/kinetix/README.md#fine细粒度延迟)。
@@ -121,7 +109,7 @@ done
   --start-seed "$KINETIX_START_SEED" --output-dir "$KINETIX_STUDY"
 ```
 
-计划固定任务、s、延迟、seed、源码与checkpoint身份。读取 `study.json` 和plan打印的摘要确认规模后再运行；`status.json` 在首次run阶段生成。一个任务包含57个逻辑条件，其中31个需要新增执行；相同任务、s及float32指令权重的条件共享结果并保留来源。本例新增992个正式回合，另有20个对齐检查回合，共1172次rollout。
+命令会生成 `study.json`，并打印计划执行的任务和回合数。确认设置后再继续；下一步开始运行时才会生成 `status.json`。
 
 ## 4. 核对零延迟运行一致性
 
@@ -175,7 +163,7 @@ for key, rows in sorted(groups.items()):
 PY
 ```
 
-同时阅读 `calibration/report.md` 与 `frozen-model.json`：`kind` 表示Hill、constant或coarse查表；`calibration_rmse` 描述拟合与校准点的差距；`requires_review` 在RMSE或最大向上跳变超过0.1时亮起。它提示检查响应形状与采样噪声，不是统计显著性检验。冻结后改变任务、数据或模型需建立新study。
+打开 `calibration/report.md` 查看拟合结果，再用上面的命令查看推荐步数。如果需要修改任务或校准数据，请使用新的输出目录重新运行。
 
 ## 7. 运行硬件映射验证
 
@@ -185,9 +173,9 @@ PY
   --python "$ROBOTICS_KINETIX_PYTHON" --gpus "$KINETIX_GPU"
 ```
 
-每个硬件条件把CSV中的 `L_hardware(s)` 注入同一policy和物理环境，测量真实rollout成功率。验证开始时固定预测文件的哈希；后续报告会检查预测、计划和校准数据是否仍一致。
+这一步会按 CSV 中各硬件的延迟运行仿真，保存实际结果，稍后与已经保存的预测进行比较。
 
-验证使用相同配对seed，以比较不同延迟条件。它检验的是**新实验条件**，不是新seed或新场景。已经复用质量/校准结果的单元标记 `calibration_overlap`，留出RMSE排除这些单元。
+验证会尝试新的“采样步数＋延迟”组合，随机 seed 保持不变。报告会自动区分新结果和复用的校准结果。
 
 ## 8. 生成报告并解读四联图
 
@@ -215,14 +203,10 @@ PY
 | `empirical_selection_gap` | 实测最优成功率减去预测选点的实测成功率；越小越好 |
 | `calibration_overlap_cells` | 复用质量/校准结果的验证条件数 |
 
-成功率使用95% Wilson区间；选点损失用配对seed bootstrap给出区间，默认2000次。该区间以冻结预测为条件。步数同时提供失败按256步预算惩罚的全体统计与成功回合统计；运行异常单独记录。
-
 <a id="实验范围与任务选择"></a>
 ## 扩大规模与换用自己的硬件数据
 
-先选择任务与样本量，再建立新的质量目录和study目录。仓内默认任务为 `mjc_walker,catapult,trampoline,mjc_half_cheetah`，默认每条件512个seed。论文§4.5使用Grasp、Half-cheetah与Walker，每条件1024个配对seed；仓内对应任务名为 `grasp_easy,mjc_half_cheetah,mjc_walker`。
-
-把第1步变量改为所需任务和 `KINETIX_EPISODES=512` 或 `1024`，然后从第2步重新执行。质量扫描和plan必须使用相同任务、回合数和起始seed，质量扫描始终覆盖s=1～5。32个seed的示例用于熟悉操作，正式结果使用预先声明的样本量和置信区间解释。
+要增加任务或回合数，修改第1步的 `KINETIX_TASKS` 和 `KINETIX_EPISODES`，换一个输出目录，再从第2步开始运行。质量扫描与 `plan` 使用同一组变量。
 
 自定义硬件档案通过plan的 `--hardware-profiles /path/to/profiles.csv` 指定。规划器读取 `profile_id,flow_steps,latency_ms` 三列，并要求上述四个profile ID各包含s=1～5；额外来源列可保留。延迟单位为毫秒。更新档案后重新plan，使硬件数据进入固定来源记录。
 
@@ -241,7 +225,7 @@ PY
 "$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py status --study-dir "$KINETIX_STUDY"
 ```
 
-中断后重新执行相同的 `run --phase ...` 命令。完整且通过哈希复核的job直接复用；存活worker按PID与输出路径接管；已停止的未完成job保留旧attempt并在新attempt中重跑整个job。使用 `--reuse-study /path/to/previous-study` 可显式复用另一个study中匹配的job，来源目录需保留。
+中断后，重新执行原来的 `run --phase ...` 命令即可。已完成的 job 会跳过，未完成的 job 会从头重跑，并把新结果放到新的 attempt 目录中，保留之前的文件。需要复用另一组实验时，加上 `--reuse-study /path/to/previous-study`，并保留那个目录。
 
 熟悉分阶段操作后，可让控制器按顺序完成verification、calibration、freeze、validation和report：
 
