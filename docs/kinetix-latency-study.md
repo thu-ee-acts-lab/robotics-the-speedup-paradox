@@ -1,172 +1,255 @@
-# KINETIX：硬件延迟与任务成功率
+# Predictive TISED：从校准数据预测最佳采样步数
 
-本工作流在固定原生物理参数下，分别测量零延迟质量、固定采样步数的延迟响应，以及硬件延迟映射后的任务成功率。支持先冻结预测、再验证，输出与 rebuttal Figure 2 对应的四联图。代码在本仓维护，参考项目不参与模型或模拟器执行。
+[English](kinetix-latency-study.en.md) · [实验操作总览](hands-on.md) · [环境配置](environment_setup.md) · [KINETIX 单次运行](../benchmarks/dynamic/kinetix/README.md)
 
-## 两种延迟模式
+这个工作流对应论文 [§4.5 Predictive TISED](https://arxiv.org/html/2606.28529v3#S4.SS5)：先分别测量策略质量、延迟敏感性和硬件推理时间，再组合出每个平台的成功率曲线，预测应该使用多少个采样步。最后才运行硬件映射实验，检验预测与实测是否一致。
 
-| CLI 名称 | 含义 | 历史别名 |
+本页先用一个任务、每条件32个配对seed走通流程，再说明如何扩大实验。模型、KINETIX与Jax2D执行源码由本仓维护；你需要准备JAX环境和可信的RTC checkpoint。
+
+## 预测器如何工作
+
+采样步数记为 **s**，对应 `--flow-steps`；它与一回合生成的动作块数量是两个指标。每个任务分别构建以下三份输入：
+
+| 输入 | 怎么获得 | 回答的问题 |
 | --- | --- | --- |
-| `coarse` | 粗粒度：将推理延迟取整到完整控制步 | `legacy-round` |
-| `fine`（默认） | 细粒度：在边界物理步内混合新旧执行器指令 | `native-blend` |
+| `G(s)`：零延迟成功率 | 保持延迟为0，运行s=1～5 | 计算量改变后，策略本身有多大机会完成任务？ |
+| `H_mode(D)`：相对延迟响应 | 固定s=5，扫描延迟，以零延迟成功率归一化 | 等待结果会损失多少任务成功率？ |
+| `L_hardware(s)`：硬件时延 | 每个平台测量s=1～5的完整动作生成时间 | 该平台会给这个配置引入多长等待？ |
 
-两者均使用 `dt=1/60 s`、`frame_skip=2`，即物理步16.667 ms、控制步33.333 ms；预测8条动作、执行4条后刷新，名义周期133.333 ms。终止判定和预算仍遵守原生控制边界。细粒度延迟表示不会缩小物理积分步长。
+组合预测为：
 
-```text
-coarse: effective_delay = round(requested_delay / control_dt) * control_dt
-fine:   effective_delay = requested_delay
+$$
+\widehat P_{h,m}(s)=\operatorname{clip}\!\left(G(s)\,H_m\!\left(d_m(L_h(s))\right),0,1\right).
+$$
 
-old_weight[k] = clip(effective_delay / physics_dt - k, 0, 1)
-command[k] = old_weight[k] * process(old_action)
-           + (1 - old_weight[k]) * process(new_action)
+`d_m` 是延迟映射：fine保持输入毫秒数，coarse取整到控制周期。例如，某配置的零延迟成功率为0.8，硬件时延对应的相对延迟因子为0.75，则组合预测为0.6；这是说明公式的示例，不是实测结果。对s=1～5逐个计算后，选择预测成功率最大的整数s，并列时选择较小s。
+
+论文把质量项写成 `acc_5 × g(alpha_Ada(s))`，其中 `alpha_Ada(s)=Tinf,Ada(s)/Tinf,Ada(5)`。**同一s在所有硬件上使用同一个质量项**；更换硬件时只替换送入延迟响应的 `L_hardware(s)`。[论文附录B.2](https://arxiv.org/html/2606.28529v3#A2.SS2)
+
+```mermaid
+flowchart LR
+    accTitle: Predictive TISED 实验流程
+    accDescr: 独立测量质量、延迟响应和硬件时延，组合并冻结预测，再进行硬件映射验证与选点比较。
+    quality["零延迟质量 G(s)"] --> freeze["组合并冻结预测"]
+    delay["延迟响应 H(D)"] --> freeze
+    hardware["硬件时延 L_h(s)"] --> freeze
+    freeze --> validation["运行硬件映射条件"]
+    validation --> report["比较预测与选点结果"]
 ```
 
-`round` 使用 nearest-even。fine 的一个分数边界槽采用指令时间平均近似，不重建槽内部的碰撞或关节状态；零延迟与完整旧动作边界走原生执行路径。新旧候选使用同源的控制步噪声，无初始预取，旧队列从零动作开始。
+### 论文设置与仓内实现
 
-旧别名继续可用；显式使用旧别名时保留旧记录标签，兼容已有扫描和分析。新工作流使用 `coarse`／`fine`，不重写历史原始记录。
+本仓提供同一“分开校准—组合预测—独立验证”流程的工程实现，拟合形式如下：
 
-## 实验范围与任务选择
+| 部分 | 论文§4.5 / 附录B.2 | 当前分析器 |
+| --- | --- | --- |
+| 零延迟质量 | 按任务使用常数或logistic响应，二项最大似然拟合 | 保留s=1～5的实测成功率；连续绘图使用PCHIP形状保持插值 |
+| fine延迟响应 | 按任务使用logistic或线性响应，以零延迟锚点归一化 | 二项似然拟合Hill曲线，并与无延迟效应的常数模型比较AIC |
+| coarse延迟响应 | 粗粒度对照采用取整后的动作延迟 | 按校准的有效延迟网格查表，并除以s=5零延迟成功率 |
+| 组合与选点 | 固定校准响应，比较硬件预测和实测 | 冻结整数预测与绘图采样点，再验证、计算误差与选点损失 |
 
-默认选择既有零延迟扫描中随采样步数增加而总体改善的四个任务，允许高步数区间的小幅波动。选择依据是已有零延迟结果，不以新延迟扫描是否出现内部最优点筛选任务。
+因此，`G(s)`在整数点直接采用本轮任务结果。fine的Hill因子为 `1 / (1 + (D / tau)^power)`；当它相比常数模型没有足够的AIC改善时使用因子1。具体实现见 [fit_task_model / predict_success](../benchmarks/dynamic/kinetix/analyze_latency_study.py)。
 
-| 任务 | 已有 N=1 成功数／512 | 已有 N=5 成功数／512 | 选择依据 |
-| --- | ---: | ---: | --- |
-| `mjc_walker` | 42 | 379 | 对采样步数敏感；N=3高于N=5，保留非单调形状 |
-| `catapult` | 278 | 362 | 明显质量差异，并在较高步数趋于平台 |
-| `trampoline` | 80 | 407 | 强质量差异；检验时序敏感任务的可分解近似 |
-| `mjc_half_cheetah` | 367 | 448 | 总体上升；N=4到5的轻微回落未显示明确配对差异 |
+<a id="两种延迟模式"></a>
+## 时间与实验条件
 
-half-cheetah的N=4相对N=5差异为+1.17个百分点，配对95%区间为[-2.93,+5.27]；walker的N=3相对N=5差异为+3.71个百分点，区间为[-1.56,+8.79]。这些波动不构成严格单调或等价的证明；两关从N=1到5的整体增益仍明显。接近饱和且缺少上升趋势的catcher不属于默认主任务。
+两种模式都保持 `physics_dt=1/60 s`、`frame_skip=2`，每条控制指令33.333 ms；预测8条动作、执行4条后刷新。fine按原生物理槽混合新旧执行器指令，coarse按控制周期nearest-even取整。`native-blend`、`legacy-round`分别是兼容别名。完整公式见 [KINETIX延迟模式](../benchmarks/dynamic/kinetix/README.md#fine细粒度延迟)。
 
-这些是本项目JAX FP32零延迟扫描的选题依据，不是本轮硬件映射结果。每个实验单元采用512个配对种子，默认0～511；种子控制策略与动作噪声，关卡初态仍固定，不代表512个独立场景。
+本工作流使用9个fine校准延迟：0～66.667 ms，间隔8.333 ms；coarse使用0、33.333和66.667 ms。固定s=5进行延迟校准。新旧指令共用控制噪声，初始旧队列为零动作，碰撞、关节求解和终止检查保留原生物理网格。
 
-| 阶段 | 配置 | 默认规模 |
-| --- | --- | ---: |
-| 对齐检查 | 四任务、两模式、N=1～5，各复查两个已有seed | 80回合，不计入正式统计 |
-| 零延迟质量 G | 四任务、N=1～5、L=0 | 复用10,240回合 |
-| 延迟校准 H | 固定N=5；fine为0～66.667 ms、间隔8.333 ms；coarse为0／33.333／66.667 ms | 新增16,384回合 |
-| 硬件映射验证 | 四任务、四档硬件、N=1～5、两模式 | 新增47,104回合 |
+默认硬件输入是 [四档延迟CSV](data/kinetix-hardware-latencies-20260811.csv)，包含 `local_ada`、`rtx3090`、`agx15`、`agx30`，每档必须完整包含s=1～5。该档案来自历史PyTorch eager FP16、同架构随机权重计时；在本页JAX FP32 policy上作为**硬件延迟场景重放**使用。若测量自己的平台，按相同CSV结构提供 `--hardware-profiles`，并记录模型、dtype、计时边界与硬件身份。分析器要求映射延迟落在本轮校准范围内。
 
-默认共124个不同的新执行配置、63,488个新回合。逻辑配置之间只有在任务、N与实际float32指令权重完全相同时才复用结果，例如快速GPU在coarse下均映射到零延迟。每个逻辑单元保留来源引用，复用不会增加独立样本数，也不会将已用于校准的点计为留出验证。
+<a id="环境与输入"></a>
+## 1. 准备运行与分析环境
 
-硬件数据来自[四档延迟档案](kinetix-hardware-latencies.md)：RTX 6000 Ada、RTX 3090、AGX Orin 15W／30W。它们是历史PyTorch eager FP16、同架构随机权重的完整动作生成计时。注入当前已训练JAX FP32策略时，称为硬件延迟场景重放；当前宿主推理墙钟不额外推进模拟器。
-
-## 环境与输入
-
-模拟依赖见 [KINETIX入口](../benchmarks/dynamic/kinetix/README.md#环境与资源)。需要兼容Python 3.11／JAX运行环境、可信的原始RTC checkpoint和一个完整的匹配零延迟扫描。执行过程中不下载模型或数据。
+已有跑通的KINETIX实验时，沿用其解释器与checkpoint目录。新机器先完成[CPU/分析及KINETIX环境配置](environment_setup.md)，生成 `.local/kinetix.env`。在仓库根目录加载该文件，确认策略目录包含本教程使用的 `worlds_l_catapult.pkl`。
 
 ```bash
-export ROBOTICS_KINETIX_PYTHON=/path/to/kinetix-env/bin/python
-export ROBOTICS_KINETIX_POLICY_DIR=/path/to/rtc-policies
+source .local/kinetix.env
+export ROBOTICS_CPU_PYTHON="${ROBOTICS_CPU_PYTHON:-$PWD/.venv/bin/python}"
+export KINETIX_ANALYSIS_PYTHON="${KINETIX_ANALYSIS_PYTHON:-$PWD/.local/envs/analysis/bin/python}"
+"$KINETIX_ANALYSIS_PYTHON" -c 'import numpy, scipy, matplotlib; print("Analysis environment ready")'
 ```
 
-编排器只使用Python标准库。拟合和画图使用独立CPU环境：
+运行环境负责JAX/Flax和GPU仿真；分析环境负责NumPy、SciPy与Matplotlib；编排器使用Python标准库。保持虚拟环境的 `bin/python` 路径，以便加载对应环境。
+
+为本次实验声明一个固定的任务、seed集合和新输出目录。`KINETIX_GPU=0` 是示例，请改为本机空闲GPU编号：
 
 ```bash
-python3 -m venv .local/kinetix-analysis-env
-.local/kinetix-analysis-env/bin/python -m pip install \
-  -r benchmarks/dynamic/kinetix/requirements-analysis.txt
-export KINETIX_ANALYSIS_PYTHON="$PWD/.local/kinetix-analysis-env/bin/python"
+export KINETIX_TASKS=catapult
+export KINETIX_EPISODES=32
+export KINETIX_START_SEED=0
+export KINETIX_GPU=0
+export KINETIX_QUALITY=runs/dynamic/kinetix/predictor_pilot_quality_001
+export KINETIX_STUDY=runs/dynamic/kinetix/predictor_pilot_001
 ```
 
-已有质量结果要求采用 `<quality-root>/<task>/case-manifest.json` 和 `episodes.jsonl` 布局。新环境可以按任务建立这组结果：
+<a id="运行工作流"></a>
+## 2. 测量零延迟质量 G(s)
+
+先预检所需资源；它读取文件身份并打印计划，不启动JAX或模拟器：
 
 ```bash
-for task in mjc_walker catapult trampoline mjc_half_cheetah; do
+bash benchmarks/dynamic/kinetix/run.sh \
+  --levels catapult --flow-steps 1,2,3,4,5 --latencies-ms 0 \
+  --mapping fine --episodes "$KINETIX_EPISODES" \
+  --start-seed "$KINETIX_START_SEED" \
+  --output-dir "$KINETIX_QUALITY/catapult" --dry-run
+```
+
+随后执行质量扫描。每个任务独占一个子目录，保存完整s=1～5结果；这正是规划器读取的布局：
+
+```bash
+for task in ${KINETIX_TASKS//,/ }; do
   bash benchmarks/dynamic/kinetix/run.sh \
     --levels "$task" --flow-steps 1,2,3,4,5 --latencies-ms 0 \
-    --mapping fine --episodes 512 --start-seed 0 --gpu 0 \
-    --output-dir "runs/dynamic/kinetix/quality_512/$task"
+    --mapping fine --episodes "$KINETIX_EPISODES" \
+    --start-seed "$KINETIX_START_SEED" --gpu "$KINETIX_GPU" \
+    --validate-native --output-dir "$KINETIX_QUALITY/$task"
 done
 ```
 
-按本机空闲设备调整GPU编号。控制器仅使用显式传入的卡；不会扩展到未指定的GPU。配对复用前会核对完整seed覆盖、源码、checkpoint、原生参数及运行栈，并执行零延迟回放检查。允许的源码迁移仅限已审查的模式名称变更。
+检查每个任务目录中的 `case-manifest.json`、`episodes.jsonl` 和 `summary.md`。本例产生5×32=160个质量回合。延迟响应用s=5零延迟成功率作分母，因此该锚点必须大于0；若为0，先检查checkpoint/任务绑定，再确定可用于该任务的policy并重新建立质量基线。
 
-## 运行工作流
-
-以下命令从仓库根目录执行。输出目录必须是新的；恢复已有任务使用 `run`，不重新执行 `plan`。
+## 3. 生成固定实验计划
 
 ```bash
-export KINETIX_STUDY=runs/dynamic/kinetix/latency_quality_512_001
-
-python benchmarks/dynamic/kinetix/latency_study.py plan \
-  --quality-run runs/dynamic/kinetix/quality_512 \
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py plan \
+  --quality-run "$KINETIX_QUALITY" \
   --policy-dir "$ROBOTICS_KINETIX_POLICY_DIR" \
-  --episodes 512 --start-seed 0 --output-dir "$KINETIX_STUDY"
+  --tasks "$KINETIX_TASKS" --episodes "$KINETIX_EPISODES" \
+  --start-seed "$KINETIX_START_SEED" --output-dir "$KINETIX_STUDY"
+```
 
-python benchmarks/dynamic/kinetix/latency_study.py run \
+计划固定任务、s、延迟、seed、源码与checkpoint身份。读取 `study.json` 和plan打印的摘要确认规模后再运行；`status.json` 在首次run阶段生成。一个任务包含57个逻辑条件，其中31个需要新增执行；相同任务、s及float32指令权重的条件共享结果并保留来源。本例新增992个正式回合，另有20个对齐检查回合，共1172次rollout。
+
+## 4. 核对零延迟运行一致性
+
+```bash
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py run \
   --study-dir "$KINETIX_STUDY" --phase verification \
-  --python "$ROBOTICS_KINETIX_PYTHON" --gpus 0,1,2
+  --python "$ROBOTICS_KINETIX_PYTHON" --gpus "$KINETIX_GPU"
+```
 
-python benchmarks/dynamic/kinetix/latency_study.py run \
+该阶段在两种延迟模式、s=1～5上复查两个已有seed，核对原生配置、初态和执行结果。通过后，`status.json` 中verification阶段标为completed，质量数据可以用于后续校准。
+
+## 5. 固定s=5，校准延迟响应
+
+```bash
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py run \
   --study-dir "$KINETIX_STUDY" --phase calibration \
-  --python "$ROBOTICS_KINETIX_PYTHON" --gpus 0,1,2
+  --python "$ROBOTICS_KINETIX_PYTHON" --gpus "$KINETIX_GPU"
+```
 
+这个阶段扫描上述fine/coarse延迟网格，保留与质量扫描相同的seed集合。零延迟锚点直接复用质量数据。等待calibration标为completed后执行冻结；先完成校准、再拟合，便于区分数据采集问题和模型拟合问题。
+
+## 6. 冻结预测，先看推荐的采样步数
+
+```bash
 "$KINETIX_ANALYSIS_PYTHON" benchmarks/dynamic/kinetix/analyze_latency_study.py freeze \
   --study-dir "$KINETIX_STUDY"
+```
 
-python benchmarks/dynamic/kinetix/latency_study.py run \
+冻结会保存 `calibration/frozen-model.json`、`predictions.csv`、`cells.csv` 和 `report.md`。其中包含G/H模型、每个硬件条件的预测、绘图曲线以及校准来源哈希。此时尚未使用硬件映射验证结果。
+
+下面的只读命令把 `predictions.csv` 的条件编号与计划关联，显示每个任务、模式和硬件的推荐s：
+
+```bash
+"$ROBOTICS_CPU_PYTHON" - <<'PY'
+import csv, json, os
+from pathlib import Path
+root = Path(os.environ["KINETIX_STUDY"])
+study = json.loads((root / "study.json").read_text())
+conditions = {c["id"]: c for c in study["conditions"]}
+groups = {}
+with (root / "calibration/predictions.csv").open() as stream:
+    for row in csv.DictReader(stream):
+        c = conditions[row["condition_id"]]
+        key = (c["task"], c["mode"], c["hardware"])
+        groups.setdefault(key, []).append((float(row["predicted_success"]), c["flow_steps"]))
+print("task,mode,hardware,recommended_steps,predicted_success")
+for key, rows in sorted(groups.items()):
+    best = max(r[0] for r in rows)
+    probability, steps = min((r for r in rows if abs(r[0] - best) < 1e-12), key=lambda r: r[1])
+    print(",".join(map(str, (*key, steps, probability))))
+PY
+```
+
+同时阅读 `calibration/report.md` 与 `frozen-model.json`：`kind` 表示Hill、constant或coarse查表；`calibration_rmse` 描述拟合与校准点的差距；`requires_review` 在RMSE或最大向上跳变超过0.1时亮起。它提示检查响应形状与采样噪声，不是统计显著性检验。冻结后改变任务、数据或模型需建立新study。
+
+## 7. 运行硬件映射验证
+
+```bash
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py run \
   --study-dir "$KINETIX_STUDY" --phase validation \
-  --python "$ROBOTICS_KINETIX_PYTHON" --gpus 0,1,2
+  --python "$ROBOTICS_KINETIX_PYTHON" --gpus "$KINETIX_GPU"
+```
 
+每个硬件条件把CSV中的 `L_hardware(s)` 注入同一policy和物理环境，测量真实rollout成功率。验证开始时固定预测文件的哈希；后续报告会检查预测、计划和校准数据是否仍一致。
+
+验证使用相同配对seed，以比较不同延迟条件。它检验的是**新实验条件**，不是新seed或新场景。已经复用质量/校准结果的单元标记 `calibration_overlap`，留出RMSE排除这些单元。
+
+## 8. 生成报告并解读四联图
+
+```bash
 "$KINETIX_ANALYSIS_PYTHON" benchmarks/dynamic/kinetix/analyze_latency_study.py report \
   --study-dir "$KINETIX_STUDY" --plots
 ```
 
-也可用一个命令顺序完成检查、校准、冻结、验证和报告；任一阶段失败会停止后续阶段：
+先读 `analysis/report.md`，再看每个任务/模式的 `*-four-panel.png` 或PDF：
+
+| 面板 | 横轴与内容 | 如何解读 |
+| --- | --- | --- |
+| 硬件时延 | s与各平台完整推理时延 | 计算预算如何变成等待时间 |
+| 零延迟质量 | s与G(s) | 增加计算是否改善这个任务 |
+| 固定policy延迟响应 | 延迟与s=5成功率/拟合曲线 | 这个任务对过时动作有多敏感 |
+| 组合预测与实测 | s与各平台的预测曲线、实测点 | 预测是否选中了高成功率的工作点 |
+
+`analysis/validation.csv` 提供可直接比较的结果：
+
+| 字段 | 含义 |
+| --- | --- |
+| `predicted_best_integer` | 验证前预测选定的s |
+| `observed_best_integers` | 实测成功率最高的整数s集合，保留并列 |
+| `heldout_rmse` / `heldout_cells` | 排除校准重叠点后的预测误差与条件数 |
+| `empirical_selection_gap` | 实测最优成功率减去预测选点的实测成功率；越小越好 |
+| `calibration_overlap_cells` | 复用质量/校准结果的验证条件数 |
+
+成功率使用95% Wilson区间；选点损失用配对seed bootstrap给出区间，默认2000次。该区间以冻结预测为条件。步数同时提供失败按256步预算惩罚的全体统计与成功回合统计；运行异常单独记录。
+
+<a id="实验范围与任务选择"></a>
+## 扩大规模与换用自己的硬件数据
+
+先选择任务与样本量，再建立新的质量目录和study目录。仓内默认任务为 `mjc_walker,catapult,trampoline,mjc_half_cheetah`，默认每条件512个seed。论文§4.5使用Grasp、Half-cheetah与Walker，每条件1024个配对seed；仓内对应任务名为 `grasp_easy,mjc_half_cheetah,mjc_walker`。
+
+把第1步变量改为所需任务和 `KINETIX_EPISODES=512` 或 `1024`，然后从第2步重新执行。质量扫描和plan必须使用相同任务、回合数和起始seed，质量扫描始终覆盖s=1～5。32个seed的示例用于熟悉操作，正式结果使用预先声明的样本量和置信区间解释。
+
+自定义硬件档案通过plan的 `--hardware-profiles /path/to/profiles.csv` 指定。规划器读取 `profile_id,flow_steps,latency_ms` 三列，并要求上述四个profile ID各包含s=1～5；额外来源列可保留。延迟单位为毫秒。更新档案后重新plan，使硬件数据进入固定来源记录。
+
+<a id="输出与版本管理"></a>
+## 输出、恢复与自动执行
+
+| 路径 | 用途 |
+| --- | --- |
+| `study.json` / `profiles/` | 固定计划与硬件输入 |
+| `status.json` | 阶段、job、GPU、PID与产物路径 |
+| `executions/<task>/<job>/attempt-*/` | 每次执行的manifest、日志、回合与请求记录 |
+| `calibration/frozen-model.json` | 验证前冻结的模型与预测 |
+| `analysis/` | 误差、选点、成功率、图表与来源记录 |
 
 ```bash
-python benchmarks/dynamic/kinetix/latency_study.py finish \
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py status --study-dir "$KINETIX_STUDY"
+```
+
+中断后重新执行相同的 `run --phase ...` 命令。完整且通过哈希复核的job直接复用；存活worker按PID与输出路径接管；已停止的未完成job保留旧attempt并在新attempt中重跑整个job。使用 `--reuse-study /path/to/previous-study` 可显式复用另一个study中匹配的job，来源目录需保留。
+
+熟悉分阶段操作后，可让控制器按顺序完成verification、calibration、freeze、validation和report：
+
+```bash
+"$ROBOTICS_CPU_PYTHON" benchmarks/dynamic/kinetix/latency_study.py finish \
   --study-dir "$KINETIX_STUDY" \
   --python "$ROBOTICS_KINETIX_PYTHON" \
-  --analysis-python "$KINETIX_ANALYSIS_PYTHON" --gpus 0,1,2
+  --analysis-python "$KINETIX_ANALYSIS_PYTHON" --gpus "$KINETIX_GPU"
 ```
 
-三张卡分别运行独立进程，单个环境的步进逻辑不变。默认每个worker绑定16个可用CPU核，可用 `--cpus-per-worker` 调整。控制器等待指定GPU空闲后启动；长任务可在tmux或后台进程中运行。
-
-查询进度无需加载模型环境：
-
-```bash
-python benchmarks/dynamic/kinetix/latency_study.py status --study-dir "$KINETIX_STUDY"
-```
-
-恢复时重新执行对应的 `run --phase ...` 命令。完整且通过原有哈希证据复核的job直接复用；控制器退出后仍存活的worker按PID和完整输出路径接管。已停止但未完成的job保留旧attempt，在新attempt中重新运行整个job。运行异常不作为策略失败加入统计。锁文件防止同一study同时启动两个控制器。冻结模型不得在验证开始后覆盖；关卡文件与原生参数在每个阶段重新核对固定基线。
-
-调整任务集合时，建立新的study，并通过 `run` 或 `finish` 的 `--reuse-study /path/to/previous-study` 显式引用匹配的已有job。工具核对源码、checkpoint、物理参数、运行栈与配置；已完成job复核覆盖和哈希，仍在运行的job等待完整结束后才纳入。来源目录须保留，部分回合不会冒充完整配置。
-
-## 输出与版本管理
-
-| 路径 | 内容 |
-| --- | --- |
-| `study.json` | 固定任务、配置、种子、硬件档案、执行来源和源码指纹 |
-| `profiles/*.csv` | 各硬件的完整精度延迟输入 |
-| `status.json` | 阶段、job、GPU、PID、输出位置及完成验证 |
-| `executions/<task>/<job>/attempt-*/` | case manifest、逐回合记录、事件、日志和统计 |
-| `calibration/frozen-model.json` | 验证前固定的G/H模型与所有映射条件的预测 |
-| `calibration/cells.csv`、`report.md` | 固定N延迟扫描和拟合诊断 |
-| `analysis/cells.csv` | 各逻辑单元成功率、区间、步数和复用来源 |
-| `analysis/validation.csv` | 预测与实测最佳整数N、留出RMSE及选点损失 |
-| `analysis/*-four-panel.png/.pdf` | 每任务、每模式的四联图 |
-| `analysis/report.md`、`analysis.json` | 完整结果与可审计来源 |
-
-所有运行产物留在被忽略的 `runs/` 下。Git保留代码、历史小型输入档案、测试和稳定说明；checkpoint、事件日志、工作区配置、实验图片及中间输出不提交。
-
-## 拟合、验证与统计口径
-
-四联图对应：硬件延迟、零延迟质量、N=5延迟响应、硬件映射预测与实测。组合关系为：
-
-```text
-predicted_success(N, hardware, mode)
-    = G(N) * H_mode(effective_latency_mode(L_hardware(N)))
-```
-
-G保留零延迟实测概率，绘图时采用PCHIP形状保持插值，不强制单调。fine下的H使用二项似然比较Hill曲线与无延迟效应模型；coarse下按实际有效延迟网格查表。粗粒度预测遵循取整台阶，不将同一延迟档位误画成连续的动力学变化。
-
-所有模型只读取零延迟质量与固定N的校准数据。整数预测和图中曲线采样点一并冻结，重绘直接读取固定数值；之后才进入硬件映射验证。校准与验证使用相同配对seed，属于实验条件留出，不能称为新seed或新场景泛化验证。拟合不佳或出现明显向上反转时保留诊断，不能为获得某种曲线而改物理参数、删除任务或挑seed。
-
-主要决策直接枚举整数N=1～5。实测最佳整数集合保留所有并列点，不代表统计显著优于其他点；预测并列时选择较小N。成功率提供95% Wilson区间；选点损失使用配对seed bootstrap，条件为已经冻结的预测，不包含拟合与硬件profile的不确定性。
-
-步数仅提供全体失败按预算惩罚的口径，以及仅成功回合口径。失败回合统一按256控制步计入总体；仅成功均值以成功回合数为分母。所有模拟回合使用完整终止／预算语义。
-
-## English summary
-
-The `coarse` and `fine` modes share the original physics grid. This workflow verifies a complete zero-delay baseline, calibrates delay response, freezes predictions, and then evaluates hardware-mapped conditions with 512 paired seeds per cell. Equivalent command-weight configurations have explicit shared provenance and never increase independent sample counts. Historical FP16 timings define replay scenarios for the trained JAX FP32 policy. All selected tasks and fit limitations remain visible in the generated reports; outputs stay outside Git.
+`--gpus 0,1,2` 可分配多个空闲GPU，默认每个worker绑定16个CPU核，使用 `--cpus-per-worker` 调整。控制器等待指定GPU空闲后启动；长实验可在tmux中运行。每个job保持单环境步进。所有日志、模型、图表和报告保存在忽略的 `runs/`，稳定代码与操作文档由Git管理。
